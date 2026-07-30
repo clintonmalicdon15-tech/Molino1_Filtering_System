@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Ciudad de Strike Filtering System", layout="wide")
-st.title("Ciudad de Strike - Strict COMELEC Address Filter")
+st.title("CDS MOLINO 1 PRIVATE SYSTEM- STRICT COMELEC ADDRESS FILTER")
 st.write(
     "Strictly filters by Unit Ranges (PH 1: 1-72 | PH 2: 101-324). Automatically catches fused formats, typo labels, and standalone valid unit numbers.")
 
