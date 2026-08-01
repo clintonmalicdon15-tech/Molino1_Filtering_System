@@ -1,9 +1,23 @@
 import re
+import os
 import base64
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Molino 1 Filtering System", layout="wide", initial_sidebar_state="expanded")
+
+# --- FILE PATHS FOR AUTO-SAVING PROGRESS ---
+DATA_FILE = "molino1_saved_data.csv"
+CONFIG_FILE = "molino1_config.txt"
+
+# --- AUTO-LOAD SAVED SESSION ON STARTUP ---
+if 'processed_df' not in st.session_state and os.path.exists(DATA_FILE) and os.path.exists(CONFIG_FILE):
+    try:
+        st.session_state['processed_df'] = pd.read_csv(DATA_FILE)
+        with open(CONFIG_FILE, "r") as f:
+            st.session_state['address_col'] = f.read().strip()
+    except Exception as e:
+        st.error("Error loading saved session. The file might be corrupted.")
 
 
 # --- SIDEBAR NAVIGATION WITH CIRCULAR LOGO ---
@@ -12,7 +26,6 @@ def display_circular_logo(image_path):
         with open(image_path, "rb") as image_file:
             encoded_string = base64.b64encode(image_file.read()).decode()
 
-        # CSS to create the perfect circle crop and center it
         html_code = f"""
         <div style="display: flex; justify-content: center; margin-bottom: 20px;">
             <img src="data:image/jpeg;base64,{encoded_string}" 
@@ -24,13 +37,13 @@ def display_circular_logo(image_path):
         st.sidebar.warning("Logo image file not found. Please ensure the file name matches.")
 
 
-# Call the logo function
 display_circular_logo("449958530_878918900941660_1079343009849520447_n (2).jpg")
 
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to:", ["Home", "Dashboard", "Filtering"])
 
 
+# --- FILTERING LOGIC ---
 def identify_subdivision(addr_str):
     has_strike = "STRIKE" in addr_str
     has_explicit_bldg = re.search(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s\-#]*\d+', addr_str)
@@ -156,8 +169,24 @@ def parse_address(address):
 # --- PAGE: HOME ---
 if page == "Home":
     st.title("Molino 1 Master Filtering System")
-    st.write(
-        "Welcome to the automated categorization system for COMELEC addresses in Barangay Molino 1. Upload your master list below to standardize addresses, detect typos, and securely map voters to their respective subdivisions.")
+    st.write("Welcome to the automated categorization system for COMELEC addresses in Barangay Molino 1.")
+
+    # Auto-Save Status Check
+    if 'processed_df' in st.session_state:
+        st.success(
+            "📁 **A saved session is currently active.** Your previous manual review progress has been loaded automatically! You can safely go to the Dashboard or Filtering tabs to continue.")
+
+        if st.button("🗑️ Start New Session (Clear Saved Data)", type="secondary"):
+            if os.path.exists(DATA_FILE): os.remove(DATA_FILE)
+            if os.path.exists(CONFIG_FILE): os.remove(CONFIG_FILE)
+            del st.session_state['processed_df']
+            st.rerun()
+
+        st.divider()
+        st.write("Or upload a new file below to overwrite the current session:")
+    else:
+        st.write(
+            "Upload your master list below to standardize addresses, detect typos, and securely map voters to their respective subdivisions.")
 
     uploaded_file = st.file_uploader("Upload Excel / CSV File", type=["xlsx", "xls", "csv"])
 
@@ -168,9 +197,18 @@ if page == "Home":
         if st.button("Run Initial Filter", type="primary"):
             df[['Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Standardized_Subdivision', 'Category']] = df[
                 address_col].apply(parse_address)
+
+            # Save to Session State
             st.session_state['processed_df'] = df
             st.session_state['address_col'] = address_col
-            st.success("File processed successfully! Navigate to 'Dashboard' or 'Filtering' in the sidebar.")
+
+            # Auto-Save to Local Disk
+            df.to_csv(DATA_FILE, index=False)
+            with open(CONFIG_FILE, "w") as f:
+                f.write(address_col)
+
+            st.success(
+                "File processed and saved securely to the system! Navigate to 'Dashboard' or 'Filtering' in the sidebar.")
 
 if page in ["Dashboard", "Filtering"] and 'processed_df' not in st.session_state:
     st.warning("Please upload and process a file on the 'Home' page first.")
@@ -193,14 +231,11 @@ elif page == "Dashboard" and 'processed_df' in st.session_state:
 
     st.subheader("Subdivision Insights")
     filter_options = [
-        "All Records (Entire Molino 1)",
-        "PHASE 1 ONLY (Strike)",
-        "PHASE 2 ONLY (Strike)",
-        "CIUDAD DE STRIKE (All Valid)",
-        "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", "LUCKY VILLE",
-        "MASUERTE ST.", "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES",
-        "PROGRESSIVE 17", "PROGRESSIVE 18", "PROGRESSIVE 20-21",
-        "MOLINO ROAD", "VILLA FELICIA", "WOODESTATE", "Needs Manual Review", "Excluded"
+        "All Records (Entire Molino 1)", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
+        "CIUDAD DE STRIKE (All Valid)", "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK",
+        "LUCKY VILLE", "MASUERTE ST.", "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES",
+        "PROGRESSIVE 17", "PROGRESSIVE 18", "PROGRESSIVE 20-21", "MOLINO ROAD",
+        "VILLA FELICIA", "WOODESTATE", "Needs Manual Review", "Excluded"
     ]
 
     selected_filter = st.selectbox("Select Subdivision or Category View:", filter_options)
@@ -231,7 +266,7 @@ elif page == "Dashboard" and 'processed_df' in st.session_state:
 elif page == "Filtering" and 'processed_df' in st.session_state:
     st.title("Data Filtering & Override")
     st.write(
-        "Use the dropdown to fix multiple addresses at once, then click 'Save & Apply All Changes' to re-route them without losing your scroll position.")
+        "Use the dropdown to fix multiple addresses at once, then click 'Save & Apply All Changes' to re-route them and automatically save your progress to the hard drive.")
 
     df = st.session_state['processed_df']
     address_col = st.session_state['address_col']
@@ -277,7 +312,11 @@ elif page == "Filtering" and 'processed_df' in st.session_state:
                     df.at[idx, 'Is_Valid_Molino_1'] = True
                     df.at[idx, 'Strike_Evaluated_Unit'] = None
 
+            # Auto-Save to Local Disk
+            df.to_csv(DATA_FILE, index=False)
+
             st.session_state['processed_df'] = df
+            st.success("Progress saved successfully to the system!")
             st.rerun()
 
     disabled_cols = [address_col, 'Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Category']
