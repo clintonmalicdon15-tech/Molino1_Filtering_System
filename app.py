@@ -1,90 +1,143 @@
 import re
+import base64
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Ciudad de Strike Filtering System", layout="wide")
-st.title("CDS MOLINO 1 PRIVATE SYSTEM- STRICT COMELEC ADDRESS FILTER")
-st.write(
-    "Strictly filters by Unit Ranges (PH 1: 1-72 | PH 2: 101-324). Automatically catches fused formats, typo labels, and standalone valid unit numbers.")
+st.set_page_config(page_title="Molino 1 Filtering System", layout="wide", initial_sidebar_state="expanded")
 
-uploaded_file = st.file_uploader("Upload Excel / CSV File", type=["xlsx", "xls", "csv"])
+
+# --- SIDEBAR NAVIGATION WITH CIRCULAR LOGO ---
+def display_circular_logo(image_path):
+    try:
+        with open(image_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode()
+
+        # CSS to create the perfect circle crop and center it
+        html_code = f"""
+        <div style="display: flex; justify-content: center; margin-bottom: 20px;">
+            <img src="data:image/jpeg;base64,{encoded_string}" 
+                 style="width: 150px; height: 150px; border-radius: 50%; object-fit: cover; box-shadow: 0px 4px 6px rgba(0,0,0,0.3);">
+        </div>
+        """
+        st.sidebar.markdown(html_code, unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.sidebar.warning("Logo image file not found. Please ensure the file name matches.")
+
+
+# Call the logo function
+display_circular_logo("449958530_878918900941660_1079343009849520447_n (2).jpg")
+
+st.sidebar.title("Navigation")
+page = st.sidebar.radio("Go to:", ["Home", "Dashboard", "Filtering"])
+
+
+def identify_subdivision(addr_str):
+    has_strike = "STRIKE" in addr_str
+    has_explicit_bldg = re.search(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s\-#]*\d+', addr_str)
+    has_explicit_unit = re.search(r'\b(?:UNIT|U|ROOM|RM|MUNIT)[\s\-#]*[A-Z]*\d+', addr_str)
+
+    if has_strike or (has_explicit_bldg and has_explicit_unit):
+        return "CIUDAD DE STRIKE"
+
+    mapping = {
+        "CAMELLA LESSANDRA": [r"CAMELLALESSANDRA", r"CAMELLA", r"LESSANDRA"],
+        "GREEN RIDGE": [r"GREENRIDGE", r"GREEN RIDGE", r"GREEN REDGIVILLAGE", r"GREENGRIDGE\s*VILLE", r"GREENRIDE"],
+        "KRAUSE PARK": [r"KRAUSEPARK", r"KRAUSE PARK", r"KRAUS PARK"],
+        "LUCKY VILLE": [r"LUCKYVILL", r"LUCKY VILLE", r"LUCKYVILLE", r"LUCKYVILE"],
+        "MASUERTE ST.": [r"MASUERTE", r"MASWERTE", r"DMASVERTE", r"MASUWERTE\s*VILL\.?"],
+        "NEW BETTER LANDSCAPE": [r"NEWBETTERLANDSCAPE", r"NEWBETTER LANDSCAPE", r"NEW BETTER LANDSCAPE", r"LANDSCAPE",
+                                 r"NBLS", r"\bNBL\b", r"NEW BETTERLAND", r"NEW BETTER LAN\s*SCAPE",
+                                 r"NEW BETTER LANDSSCAPE"],
+        "ORIENT VILLE": [r"ORIENTVILLE", r"ORIENT VILLE", r"ORIENVILLE"],
+        "PAULA HOMES": [r"PAULAHOMES", r"PAULA HOMES", r"PAULA HOME", r"PAULA HMES", r"PAULA HMS", r"\bHOMES\b"],
+        "PROGRESSIVE 17": [r"PROG\.?\s*17", r"PROGRESSIVE\s*17", r"PROGRESSIVE VILL\.?17"],
+        "PROGRESSIVE 18": [r"PROG\.?\s*18", r"PROGRESSIVE\s*18", r"PROG\.?\s*VILLE\.?\s*18", r"PROG\.?VILLE\s*18",
+                           r"PROG\.?\s*VILLAGE 18", r"PROG\.?\s*VILLAG3 18", r"PROG\.?\s*VILLAGE #18",
+                           r"PRGRESSIVE VILLAGE 18"],
+        "PROGRESSIVE 20-21": [r"PROG\.?\s*20-21", r"PROGESSIVE\s*20\s*21", r"PROGRESSIVE\s*20-21", r"PROG\.?\s*20\s*21",
+                              r"PROG\.?\s*VILL\.?#\s*20-21", r"PROG\.?\s*VILL\.?#\s*20", r"PROGRESSIVE\s*20\s*&\s*21",
+                              r"PROG\.?\s*21", r"PROG\.?\s*VILL\.?\s*20", r"PROG\.?\s*VILL\.?\s*20-21",
+                              r"PROGRESSIVE\s*21", r"PROGRESSIVE\s*2021", r"PROGRESSIVE VILLAGE 20-21"],
+        "MOLINO ROAD": [r"MOLINO 1 ROAD", r"MOLINO I ROAD", r"\bROAD\b", r"\bBUROL\b", r"MOLINO 1 RD", r"MOLINO I RD",
+                        r"MOLINO RD", r"\bPROPER\b", r"IFUGAO\s*ST\.?"],
+        "VILLA FELICIA": [r"VILLAFELICIA", r"VILLA FELICIA", r"VILLA EFELICIA", r"VILLA FELCIA", r"V\.FELICIA",
+                          r"VILLA FELIOA", r"VILLA FELECIA"],
+        "WOODESTATE": [r"WOODESTATE", r"WOOD ESTATE", r"WOODSTATE", r"WOOD STATE", r"WEV\s*[1I]?", r"\bWEV\b",
+                       r"WOODDESTAE", r"WOODESATE"]
+    }
+
+    for sub_name, patterns in mapping.items():
+        for pat in patterns:
+            if re.search(pat, addr_str):
+                return sub_name
+
+    if re.search(r'\b(?:ST|STREET)\b', addr_str) and not re.search(r'\b(?:ROAD|RD|BUROL|PROPER|IFUGAO)\b', addr_str):
+        return "UNKNOWN"
+
+    if "MOLINO" in addr_str:
+        nums = re.findall(r'\b\d+\b', addr_str)
+        for n in nums:
+            if 0 <= int(n) <= 1000:
+                return "MOLINO ROAD"
+
+    return "UNKNOWN"
 
 
 def parse_address(address):
-    """
-    Parses messy COMELEC addresses. Categorizes failures strictly into Excluded (non-strike) vs Needs Manual Review (strike).
-    """
     if pd.isna(address):
-        return pd.Series([False, None, "Excluded - Missing Address"])
+        return pd.Series([False, None, "NONE", "Excluded - Missing Address"])
 
     addr_str = str(address).upper()
-
-    # Clean up common data entry typos
     addr_str = addr_str.replace("=", " ").replace("_", " ")
 
-    # 1. Molino Check (Rule: Banish Molino completely to Excluded)
-    if "MOLINO" in addr_str:
-        return pd.Series([False, None, "Excluded - Contains Molino Address"])
+    subdivision = identify_subdivision(addr_str)
 
-    # 2. City validation (Rule: If no STRIKE, banish to Excluded)
-    if "STRIKE" not in addr_str:
-        return pd.Series([False, None, "Excluded - Non-Ciudad de Strike"])
+    if subdivision == "UNKNOWN":
+        return pd.Series([False, None, "UNKNOWN", "Needs Manual Review - Unknown Subdivision / Street"])
 
-    # --- EVERYTHING BELOW THIS LINE IS CONFIRMED CIUDAD DE STRIKE ---
-
-    # 3. Block/Lot Flag (Rule: "BLOCK16 LOT11" goes to manual review)
-    if re.search(r'\b(?:LOT|L|BLOCK|BLK)\b', addr_str):
-        return pd.Series([True, None, "Needs Manual Review - Block/Lot Format"])
+    if subdivision != "CIUDAD DE STRIKE":
+        return pd.Series([True, None, subdivision, subdivision])
 
     unit_str = None
-    category = None
+    clean_unit_str = None
+    category = "Needs Manual Review - No Number Found"
 
-    # 4. Extract Explicit Unit (UNIT, U, ROOM, RM)
-    unit_match = re.search(r'\b(?:UNIT|U|ROOM|RM)[\s\-#]*[A-Z]*(\d+(?:-\d+)?)', addr_str)
-
+    unit_match = re.search(r'\b(?:UNIT|U|ROOM|RM|MUNIT)[\s\-#]*[A-Z]*(\d+(?:-\d+)?)', addr_str)
     if unit_match:
         unit_str = unit_match.group(1)
     else:
-        # Matches dashed bldg-unit combos (e.g., "BLDG 4-219" -> extracts "219")
-        bldg_dash_match = re.search(r'\b(?:BLDG|BUILDING|BLG|B)[\s#]*\d+[\s\-]+(\d+(?:-\d+)?)', addr_str)
+        bldg_dash_match = re.search(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s#]*\d+[\s\-]+(\d+(?:-\d+)?)',
+                                    addr_str)
         if bldg_dash_match:
             unit_str = bldg_dash_match.group(1)
         else:
-            # Check standalone '#' but ONLY if NOT attached to B/BLDG/BLG
-            hash_match = re.search(r'(?<!B)(?<!BLDG)(?<!BLG)(?<!BUILDING)[\s\-]*#[\s\-]*[A-Z]*(\d+(?:-\d+)?)', addr_str)
+            hash_match = re.search(
+                r'(?<!B)(?<!BLDG)(?<!BLG)(?<!BUILDING)(?<!BUILDUING)(?<!BULIDING)[\s\-]*#[\s\-]*[A-Z]*(\d+(?:-\d+)?)',
+                addr_str)
             if hash_match:
                 unit_str = hash_match.group(1)
 
-    # 5. Check for leading unit before building (e.g., "209 B4", "216 BLDG5", "121 BLG16")
     if not unit_str:
         leading_match = re.search(
-            r'\b(\d+(?:-\d+)?)[\s\-]*(?:(?:PHASE|PH|P)[\s\-]*[12I]+[\s\-]*)?(?:B|BLDG|BLG|BUILDING)', addr_str)
+            r'\b(\d+(?:-\d+)?)[\s\-]*(?:(?:PHASE|PH|P)[\s\-]*[12I]+[\s\-]*)?(?:B|BLDG|BLG|BUILDING|BUILDUING|BULIDING)\.?',
+            addr_str)
         if leading_match:
             unit_str = leading_match.group(1)
 
-    # 6. Fallback: Standalone valid numbers (e.g., "208 CIUDAD DE STRIKE")
     if not unit_str:
-        # Hide Phase text so we don't accidentally grab the "1" or "2"
         clean_addr = re.sub(r'\b(?:PHASE|PH|P)[\s\-]*[12I]+\b', '', addr_str)
-        # Hide explicit Building numbers so we don't treat "BLDG 10" as Unit 10
-        clean_addr = re.sub(r'\b(?:BLDG|BUILDING|BLG|B)[\s\-#]*\d+\b', '', clean_addr)
-
-        # Look at any numbers remaining in the address
+        clean_addr = re.sub(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s\-#]*\d+\b', '', clean_addr)
         standalone_nums = re.findall(r'\b\d+\b', clean_addr)
         for num_str in standalone_nums:
             num = int(num_str)
-            # If the standalone number perfectly fits one of our ranges, accept it as the unit
             if 1 <= num <= 72 or 101 <= num <= 324:
                 unit_str = num_str
                 break
 
-    # 7. Strict Range Evaluation & Final Flags
     if unit_str:
-        # Heal dashes in typos (e.g., "2-12" -> "212")
         clean_unit_str = unit_str.replace("-", "")
         unit_num = int(clean_unit_str)
 
-        # Core Range Logic
         if 1 <= unit_num <= 72:
             category = "PH 1"
         elif 101 <= unit_num <= 324:
@@ -92,64 +145,162 @@ def parse_address(address):
         else:
             category = "Needs Manual Review - Out of Range"
     else:
-        # No valid unit number was found at all.
-        # Check if they provided a Building number but no Unit
-        if re.search(r'\b(?:BLDG|BUILDING|BLG|B)[\s\-#]*\d+', addr_str):
+        if re.search(r'\b(?:LOT|L|BLOCK|BLK)\b', addr_str):
+            category = "Needs Manual Review - Block/Lot Format"
+        elif re.search(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s\-#]*\d+', addr_str):
             category = "Needs Manual Review - Only Bldg Number Found"
-        # Purely text (like "CIUDAD DE STRIKE PHASE 2" without any valid unit ranges)
-        else:
-            category = "Needs Manual Review - No Number Found"
 
-    return pd.Series([True, clean_unit_str if unit_str else None, category])
+    return pd.Series([True, clean_unit_str, subdivision, category])
 
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+# --- PAGE: HOME ---
+if page == "Home":
+    st.title("Molino 1 Master Filtering System")
+    st.write(
+        "Welcome to the automated categorization system for COMELEC addresses in Barangay Molino 1. Upload your master list below to standardize addresses, detect typos, and securely map voters to their respective subdivisions.")
 
-    address_col = st.selectbox("Select the Address Column from your file:", df.columns)
+    uploaded_file = st.file_uploader("Upload Excel / CSV File", type=["xlsx", "xls", "csv"])
 
-    if st.button("Run Filtering System"):
-        df[['Is_Ciudad_De_Strike', 'Evaluated_Unit', 'Category']] = df[address_col].apply(parse_address)
-        st.session_state['processed_df'] = df
+    if uploaded_file is not None:
+        df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith('.csv') else pd.read_excel(uploaded_file)
+        address_col = st.selectbox("Select the Address Column from your file:", df.columns)
 
-if 'processed_df' in st.session_state:
+        if st.button("Run Initial Filter", type="primary"):
+            df[['Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Standardized_Subdivision', 'Category']] = df[
+                address_col].apply(parse_address)
+            st.session_state['processed_df'] = df
+            st.session_state['address_col'] = address_col
+            st.success("File processed successfully! Navigate to 'Dashboard' or 'Filtering' in the sidebar.")
+
+if page in ["Dashboard", "Filtering"] and 'processed_df' not in st.session_state:
+    st.warning("Please upload and process a file on the 'Home' page first.")
+
+# --- PAGE: DASHBOARD ---
+elif page == "Dashboard" and 'processed_df' in st.session_state:
+    st.title("System Dashboard")
+    st.write("Visual breakdown of the processed COMELEC data.")
+
     df = st.session_state['processed_df']
 
-    st.divider()
-    st.subheader("Filter Summary Dashboard")
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Ciudad de Strike", (df['Is_Ciudad_De_Strike'] == True).sum())
-    c2.metric("Phase 1 (1-72)", (df['Category'] == 'PH 1').sum())
-    c3.metric("Phase 2 (101-324)", (df['Category'] == 'PH 2').sum())
-    c4.metric("Needs Review (Strike Only)", df['Category'].str.startswith('Needs Manual Review').sum())
+    st.subheader("Global Metrics")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Total Records Uploaded", len(df))
+    m2.metric("Successfully Categorized",
+              len(df[~df['Category'].str.startswith('Needs Manual') & ~df['Category'].str.startswith('Excluded')]))
+    m3.metric("Pending Manual Review", len(df[df['Category'].str.startswith('Needs Manual')]))
 
     st.divider()
 
-    selected_filter = st.radio(
-        "**Select Category View:**",
-        ["All Records", "PH 1 Only", "PH 2 Only", "Needs Manual Review", "Excluded (Non-Strike / Molino)"],
-        horizontal=True
-    )
+    st.subheader("Subdivision Insights")
+    filter_options = [
+        "All Records (Entire Molino 1)",
+        "PHASE 1 ONLY (Strike)",
+        "PHASE 2 ONLY (Strike)",
+        "CIUDAD DE STRIKE (All Valid)",
+        "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", "LUCKY VILLE",
+        "MASUERTE ST.", "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES",
+        "PROGRESSIVE 17", "PROGRESSIVE 18", "PROGRESSIVE 20-21",
+        "MOLINO ROAD", "VILLA FELICIA", "WOODESTATE", "Needs Manual Review", "Excluded"
+    ]
 
-    if selected_filter == "PH 1 Only":
+    selected_filter = st.selectbox("Select Subdivision or Category View:", filter_options)
+
+    if selected_filter == "All Records (Entire Molino 1)":
+        view_df = df
+        st.write("**Visual Breakdown: All Molino 1 Subdivisions**")
+        st.line_chart(view_df['Standardized_Subdivision'].value_counts())
+    elif selected_filter == "PHASE 1 ONLY (Strike)":
         view_df = df[df['Category'] == 'PH 1']
-    elif selected_filter == "PH 2 Only":
+        st.line_chart(view_df['Category'].value_counts())
+    elif selected_filter == "PHASE 2 ONLY (Strike)":
         view_df = df[df['Category'] == 'PH 2']
+        st.line_chart(view_df['Category'].value_counts())
+    elif selected_filter == "CIUDAD DE STRIKE (All Valid)":
+        view_df = df[df['Category'].isin(['PH 1', 'PH 2'])]
+        st.line_chart(view_df['Category'].value_counts())
     elif selected_filter == "Needs Manual Review":
         view_df = df[df['Category'].str.startswith('Needs Manual Review')]
-    elif selected_filter == "Excluded (Non-Strike / Molino)":
+        st.line_chart(view_df['Category'].value_counts())
+    elif selected_filter == "Excluded":
         view_df = df[df['Category'].str.startswith('Excluded')]
     else:
+        view_df = df[df['Standardized_Subdivision'] == selected_filter]
+        st.line_chart(view_df['Category'].value_counts())
+
+# --- PAGE: FILTERING ---
+elif page == "Filtering" and 'processed_df' in st.session_state:
+    st.title("Data Filtering & Override")
+    st.write(
+        "Use the dropdown to fix multiple addresses at once, then click 'Save & Apply All Changes' to re-route them without losing your scroll position.")
+
+    df = st.session_state['processed_df']
+    address_col = st.session_state['address_col']
+
+    subdivision_options = [
+        "UNKNOWN", "CIUDAD DE STRIKE", "CAMELLA LESSANDRA", "GREEN RIDGE",
+        "KRAUSE PARK", "LUCKY VILLE", "MASUERTE ST.", "NEW BETTER LANDSCAPE",
+        "ORIENT VILLE", "PAULA HOMES", "PROGRESSIVE 17", "PROGRESSIVE 18",
+        "PROGRESSIVE 20-21", "MOLINO ROAD", "VILLA FELICIA", "WOODESTATE"
+    ]
+
+    filter_options = ["Needs Manual Review", "All Records (Entire Molino 1)"] + subdivision_options[1:] + ["Excluded"]
+    selected_filter = st.selectbox("**Select Data View to Edit:**", filter_options)
+
+    if selected_filter == "All Records (Entire Molino 1)":
         view_df = df
+    elif selected_filter == "Needs Manual Review":
+        view_df = df[df['Category'].str.startswith('Needs Manual Review')]
+    elif selected_filter == "Excluded":
+        view_df = df[df['Category'].str.startswith('Excluded')]
+    else:
+        view_df = df[df['Standardized_Subdivision'] == selected_filter]
 
-    st.write(f"Showing **{len(view_df)}** entries:")
-    st.dataframe(view_df, use_container_width=True)
+    if st.button("🔄 Save & Apply All Changes", type="primary"):
+        if 'edited_df_state' in st.session_state:
+            edited_df_current = st.session_state['edited_df_state']
+            changed_indices = edited_df_current[
+                edited_df_current['Standardized_Subdivision'] != view_df['Standardized_Subdivision']].index
 
+            for idx in changed_indices:
+                new_sub = edited_df_current.at[idx, 'Standardized_Subdivision']
+                df.at[idx, 'Standardized_Subdivision'] = new_sub
+
+                if new_sub == "UNKNOWN":
+                    df.at[idx, 'Category'] = "Needs Manual Review - Unknown Subdivision / Street"
+                elif new_sub == "CIUDAD DE STRIKE":
+                    parsed = parse_address(df.at[idx, address_col])
+                    df.at[idx, 'Strike_Evaluated_Unit'] = parsed.iloc[1]
+                    df.at[idx, 'Category'] = parsed.iloc[3]
+                    df.at[idx, 'Is_Valid_Molino_1'] = True
+                else:
+                    df.at[idx, 'Category'] = new_sub
+                    df.at[idx, 'Is_Valid_Molino_1'] = True
+                    df.at[idx, 'Strike_Evaluated_Unit'] = None
+
+            st.session_state['processed_df'] = df
+            st.rerun()
+
+    disabled_cols = [address_col, 'Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Category']
+
+    st.session_state['edited_df_state'] = st.data_editor(
+        view_df,
+        use_container_width=True,
+        disabled=disabled_cols,
+        column_config={
+            "Standardized_Subdivision": st.column_config.SelectboxColumn(
+                "Standardized_Subdivision",
+                help="Select to automatically move the address to the correct subdivision",
+                options=subdivision_options,
+                required=True
+            )
+        }
+    )
+
+    st.divider()
     csv = view_df.to_csv(index=False).encode('utf-8')
     st.download_button(
-        label=f"Export '{selected_filter}' to CSV",
+        label=f"Export Data to CSV",
         data=csv,
-        file_name=f"Ciudad_de_Strike_{selected_filter.replace(' ', '_').replace('/', '_')}.csv",
+        file_name=f"Molino1_{selected_filter.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')}.csv",
         mime="text/csv"
     )
