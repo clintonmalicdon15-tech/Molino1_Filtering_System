@@ -3,8 +3,25 @@ import os
 import base64
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Molino 1 Filtering System", layout="wide", initial_sidebar_state="expanded")
+
+# --- DISABLE 'CTRL + C' CLEAR CACHE POPUP ---
+components.html(
+    """
+    <script>
+    const doc = window.parent.document;
+    doc.addEventListener('keydown', function(e) {
+        if (e.key === 'c' || e.key === 'C') {
+            e.stopPropagation();
+        }
+    }, true);
+    </script>
+    """,
+    height=0,
+    width=0,
+)
 
 # --- FILE PATHS FOR AUTO-SAVING PROGRESS ---
 DATA_FILE = "molino1_saved_data.csv"
@@ -81,6 +98,76 @@ def identify_subdivision(addr_str):
                 
     return "UNKNOWN"
 
+def evaluate_strike_address(addr_str):
+    # 1. Look for Explicit Phase Text
+    explicit_phase = None
+    ph1_match = re.search(r'\b(?:PHASE|PH|P)[\s\-]*1\b', addr_str)
+    ph2_match = re.search(r'\b(?:PHASE|PH|P)[\s\-]*2\b', addr_str)
+    
+    if ph1_match and not ph2_match: 
+        explicit_phase = 1
+    elif ph2_match and not ph1_match: 
+        explicit_phase = 2
+    elif ph1_match and ph2_match:
+        return None, "Needs Manual Review - Multiple Phases Detected"
+        
+    # 2. Reject Blocks/Lots instantly for Strike
+    if re.search(r'\b(?:BLK|BLOCK|LOT|L)[\s\-]*\d+', addr_str):
+        return None, "Needs Manual Review - Block/Lot Format Found"
+        
+    # 3. Safely Extract Unit Number
+    unit_str = None
+    unit_match = re.search(r'\b(?:UNIT|U|ROOM|RM|MUNIT)[\s\-#]*[A-Z]*(\d+)\b', addr_str)
+    
+    if unit_match:
+        unit_str = unit_match.group(1)
+    else:
+        bldg_dash_match = re.search(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s#]*\d+[\s\-]+(\d+)\b', addr_str)
+        if bldg_dash_match:
+            unit_str = bldg_dash_match.group(1)
+        else:
+            hash_match = re.search(r'(?<!B)(?<!BLDG)(?<!BLG)(?<!BUILDING)(?<!BUILDUING)(?<!BULIDING)[\s\-]*#[\s\-]*[A-Z]*(\d+)\b', addr_str)
+            if hash_match:
+                unit_str = hash_match.group(1)
+                
+    # 4. Fallback search (If no explicit word like 'UNIT' was used)
+    if not unit_str:
+        clean_addr = addr_str
+        clean_addr = re.sub(r'\b(?:PHASE|PH|P)[\s\-]*[12I]+\b', '', clean_addr)
+        clean_addr = re.sub(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s\-#]*\d+\b', '', clean_addr)
+        
+        standalone_nums = re.findall(r'\b\d+\b', clean_addr)
+        
+        valid_unit_candidates = []
+        for n in standalone_nums:
+            num = int(n)
+            if (1 <= num <= 72) or (101 <= num <= 324):
+                valid_unit_candidates.append(n)
+        
+        if len(valid_unit_candidates) == 1:
+            unit_str = valid_unit_candidates[0]
+        elif len(valid_unit_candidates) > 1:
+            return None, "Needs Manual Review - Multiple Number Candidates"
+        else:
+            return None, "Needs Manual Review - No Valid Unit Number Found"
+            
+    # 5. Calculate Expected Phase from Unit Number
+    unit_num = int(unit_str)
+    calc_phase = None
+    if 1 <= unit_num <= 72:
+        calc_phase = 1
+    elif 101 <= unit_num <= 324:
+        calc_phase = 2
+        
+    if not calc_phase:
+        return unit_str, "Needs Manual Review - Unit Out of Range"
+        
+    # 6. CRITICAL FIX: Cross-reference Explicit Phase with Calculated Phase
+    if explicit_phase is not None and explicit_phase != calc_phase:
+        return unit_str, f"Needs Manual Review - Mismatch (Says PH {explicit_phase}, Unit {unit_num} is PH {calc_phase})"
+        
+    return unit_str, f"PH {calc_phase}"
+
 def parse_address(address):
     if pd.isna(address):
         return pd.Series([False, None, "NONE", "Excluded - Missing Address"])
@@ -96,67 +183,7 @@ def parse_address(address):
     if subdivision != "CIUDAD DE STRIKE":
         return pd.Series([True, None, subdivision, subdivision])
         
-    unit_str = None
-    category = "Needs Manual Review - No Number Found" 
-        
-    # 1. Look for explicitly stated units (UNIT 12, RM 12)
-    unit_match = re.search(r'\b(?:UNIT|U|ROOM|RM|MUNIT)[\s\-#]*[A-Z]*(\d+(?:-\d+)?)', addr_str)
-    if unit_match:
-        unit_str = unit_match.group(1)
-    else:
-        # 2. Look for BLDG [num] DASH [unit] format (e.g., BLDG 5 - 12)
-        bldg_dash_match = re.search(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s#]*\d+[\s\-]+(\d+(?:-\d+)?)', addr_str)
-        if bldg_dash_match:
-            unit_str = bldg_dash_match.group(1)
-        else:
-            # 3. Look for # [unit] (Ensuring it's not part of BLDG #)
-            hash_match = re.search(r'(?<!B)(?<!BLDG)(?<!BLG)(?<!BUILDING)(?<!BUILDUING)(?<!BULIDING)[\s\-]*#[\s\-]*[A-Z]*(\d+(?:-\d+)?)', addr_str)
-            if hash_match:
-                unit_str = hash_match.group(1)
-            
-    # 4. Fallback search (Safe Extraction)
-    if not unit_str:
-        # Erase Phase Numbers and Building Numbers so they aren't confused as units
-        clean_addr = re.sub(r'\b(?:PHASE|PH|P)[\s\-]*[12I]+\b', '', addr_str)
-        clean_addr = re.sub(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s\-#]*\d+\b', '', clean_addr)
-        
-        # Look for remaining standalone numbers
-        standalone_nums = re.findall(r'\b\d+(?:-\d+)?\b', clean_addr)
-        
-        for num_str in standalone_nums:
-            try:
-                # Check the first number in case of ranges like "12-14"
-                check_num = int(num_str.split('-')[0])
-                if (1 <= check_num <= 72) or (101 <= check_num <= 324):
-                    unit_str = num_str
-                    break
-            except ValueError:
-                continue
-
-    # Evaluate the found unit
-    if unit_str:
-        # Handle cases like "12-14" by isolating the primary unit number
-        primary_unit_str = unit_str.split('-')[0]
-        clean_unit_str = re.sub(r'[^0-9]', '', primary_unit_str)
-        
-        try:
-            unit_num = int(clean_unit_str)
-            
-            if 1 <= unit_num <= 72:
-                category = "PH 1"
-            elif 101 <= unit_num <= 324:
-                category = "PH 2"
-            else:
-                category = "Needs Manual Review - Out of Range"
-        except ValueError:
-            category = "Needs Manual Review - Invalid Format"
-    else:
-        # Specifically identify WHY it failed for manual review
-        if re.search(r'\b(?:LOT|L|BLOCK|BLK)\b', addr_str):
-            category = "Needs Manual Review - Block/Lot Format"
-        elif re.search(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s\-#]*\d+', addr_str):
-            category = "Needs Manual Review - Only Bldg Number Found"
-                
+    unit_str, category = evaluate_strike_address(addr_str)
     return pd.Series([True, unit_str, subdivision, category])
 
 
