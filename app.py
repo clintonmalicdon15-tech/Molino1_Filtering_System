@@ -37,8 +37,8 @@ def display_circular_logo(image_path):
 
 display_circular_logo("449958530_878918900941660_1079343009849520447_n (2).jpg")
 
-st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to:", ["Home", "Dashboard", "Filtering"])
+# Navigation title removed as requested
+page = st.sidebar.radio("", ["Home", "Dashboard", "Filtering"])
 
 # --- FILTERING LOGIC ---
 def identify_subdivision(addr_str):
@@ -152,6 +152,9 @@ if page == "Home":
     st.title("Molino 1 Master Filtering System")
     st.write("Welcome to the automated categorization system for COMELEC addresses in Barangay Molino 1.")
     
+    # Google Docs Guidelines Link Callout
+    st.info("📖 **[Click here to view the Official System Guidelines & Documentation](https://docs.google.com/document/d/1dJ_UXOew4EFtwTX6FqOZnj_98x6DweSlJLoO2Iwi8Io/edit?usp=sharing)**")
+    
     if 'processed_df' in st.session_state:
         st.success("📁 **A saved session is currently active.** Your previous manual review progress has been loaded automatically! You can safely go to the Dashboard or Filtering tabs to continue.")
         
@@ -203,10 +206,8 @@ elif page == "Dashboard" and 'processed_df' in st.session_state:
         "VILLA FELICIA", "WOODESTATE", "Needs Manual Review", "Excluded"
     ]
     
-    # Moved the selector ABOVE the metrics so the metrics can react to the choice
     selected_filter = st.selectbox("Select Subdivision or Category View:", filter_options)
     
-    # Generate the filtered dataframe BEFORE calculating the metrics
     if selected_filter == "All Records (Entire Molino 1)":
         view_df = df
     elif selected_filter == "PHASE 1 ONLY (Strike)":
@@ -224,24 +225,17 @@ elif page == "Dashboard" and 'processed_df' in st.session_state:
         
     st.divider()
 
-    # Dynamic Metrics logic
     st.subheader("Current View Metrics")
     m1, m2, m3 = st.columns(3)
     
-    # Metric 1: Total records in the CURRENT view
     m1.metric(f"Total in {selected_filter[:15]}...", len(view_df))
-    
-    # Metric 2: Valid records in the CURRENT view
     valid_count_in_view = len(view_df[~view_df['Category'].str.startswith('Needs Manual') & ~view_df['Category'].str.startswith('Excluded')])
     m2.metric("Categorized in View", valid_count_in_view)
-    
-    # Metric 3: Global Pending Review (Locked to the master list as requested)
     global_pending = len(df[df['Category'].str.startswith('Needs Manual')])
     m3.metric("Global Pending Review", global_pending)
     
     st.divider()
     
-    # Charts logic
     if selected_filter == "All Records (Entire Molino 1)":
         st.write("**Visual Breakdown: All Molino 1 Subdivisions**")
         st.line_chart(view_df['Standardized_Subdivision'].value_counts())
