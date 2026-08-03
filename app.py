@@ -194,14 +194,6 @@ elif page == "Dashboard" and 'processed_df' in st.session_state:
     
     df = st.session_state['processed_df']
     
-    st.subheader("Global Metrics")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Total Records Uploaded", len(df))
-    m2.metric("Successfully Categorized", len(df[~df['Category'].str.startswith('Needs Manual') & ~df['Category'].str.startswith('Excluded')]))
-    m3.metric("Pending Manual Review", len(df[df['Category'].str.startswith('Needs Manual')]))
-    
-    st.divider()
-    
     st.subheader("Subdivision Insights")
     filter_options = [
         "All Records (Entire Molino 1)", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
@@ -211,28 +203,50 @@ elif page == "Dashboard" and 'processed_df' in st.session_state:
         "VILLA FELICIA", "WOODESTATE", "Needs Manual Review", "Excluded"
     ]
     
+    # Moved the selector ABOVE the metrics so the metrics can react to the choice
     selected_filter = st.selectbox("Select Subdivision or Category View:", filter_options)
     
+    # Generate the filtered dataframe BEFORE calculating the metrics
     if selected_filter == "All Records (Entire Molino 1)":
         view_df = df
-        st.write("**Visual Breakdown: All Molino 1 Subdivisions**")
-        st.line_chart(view_df['Standardized_Subdivision'].value_counts())
     elif selected_filter == "PHASE 1 ONLY (Strike)":
         view_df = df[df['Category'] == 'PH 1']
-        st.line_chart(view_df['Category'].value_counts())
     elif selected_filter == "PHASE 2 ONLY (Strike)":
         view_df = df[df['Category'] == 'PH 2']
-        st.line_chart(view_df['Category'].value_counts())
     elif selected_filter == "CIUDAD DE STRIKE (All Valid)":
         view_df = df[df['Category'].isin(['PH 1', 'PH 2'])]
-        st.line_chart(view_df['Category'].value_counts())
     elif selected_filter == "Needs Manual Review":
         view_df = df[df['Category'].str.startswith('Needs Manual Review')]
-        st.line_chart(view_df['Category'].value_counts())
     elif selected_filter == "Excluded":
         view_df = df[df['Category'].str.startswith('Excluded')]
     else:
         view_df = df[df['Standardized_Subdivision'] == selected_filter]
+        
+    st.divider()
+
+    # Dynamic Metrics logic
+    st.subheader("Current View Metrics")
+    m1, m2, m3 = st.columns(3)
+    
+    # Metric 1: Total records in the CURRENT view
+    m1.metric(f"Total in {selected_filter[:15]}...", len(view_df))
+    
+    # Metric 2: Valid records in the CURRENT view
+    valid_count_in_view = len(view_df[~view_df['Category'].str.startswith('Needs Manual') & ~view_df['Category'].str.startswith('Excluded')])
+    m2.metric("Categorized in View", valid_count_in_view)
+    
+    # Metric 3: Global Pending Review (Locked to the master list as requested)
+    global_pending = len(df[df['Category'].str.startswith('Needs Manual')])
+    m3.metric("Global Pending Review", global_pending)
+    
+    st.divider()
+    
+    # Charts logic
+    if selected_filter == "All Records (Entire Molino 1)":
+        st.write("**Visual Breakdown: All Molino 1 Subdivisions**")
+        st.line_chart(view_df['Standardized_Subdivision'].value_counts())
+    else:
+        st.write(f"**Visual Breakdown: {selected_filter}**")
         st.line_chart(view_df['Category'].value_counts())
 
 # --- PAGE: FILTERING ---
@@ -243,7 +257,6 @@ elif page == "Filtering" and 'processed_df' in st.session_state:
     df = st.session_state['processed_df']
     address_col = st.session_state['address_col']
     
-    # ADDED: Explicit Force Phase 1 and Phase 2 overrides
     subdivision_options = [
         "UNKNOWN", "CIUDAD DE STRIKE", "CIUDAD DE STRIKE (Force PH 1)", "CIUDAD DE STRIKE (Force PH 2)",
         "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", "LUCKY VILLE", "MASUERTE ST.", 
@@ -251,7 +264,6 @@ elif page == "Filtering" and 'processed_df' in st.session_state:
         "PROGRESSIVE 20-21", "MOLINO ROAD", "VILLA FELICIA", "WOODESTATE"
     ]
     
-    # ADDED: Proper Phase filtering views
     filter_options = [
         "Needs Manual Review", "All Records (Entire Molino 1)", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
         "CIUDAD DE STRIKE (All Valid)", "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", 
@@ -296,7 +308,6 @@ elif page == "Filtering" and 'processed_df' in st.session_state:
                     df.at[idx, 'Category'] = parsed.iloc[3]
                     df.at[idx, 'Is_Valid_Molino_1'] = True
                     
-                # ADDED: Manual Phase override handling
                 elif new_sub == "CIUDAD DE STRIKE (Force PH 1)":
                     df.at[idx, 'Standardized_Subdivision'] = "CIUDAD DE STRIKE"
                     df.at[idx, 'Category'] = "PH 1"
