@@ -86,53 +86,48 @@ def is_fake_name(name):
         
     return False
 
-# --- LOGIN SCREEN ---
+# --- SMART LOGIN MODAL ---
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
     st.session_state['role'] = None
     st.session_state['user_name'] = ""
 
 if not st.session_state['logged_in']:
-    st.title("🛡️ System Authentication")
-    st.write("Welcome to the Molino 1 Filtering System. Please identify yourself to continue.")
-    st.divider()
+    # Adding some vertical space to center the "modal"
+    st.write("<br><br><br>", unsafe_allow_html=True)
     
-    tab1, tab2 = st.tabs(["👤 Staff / User Login", "🔑 Admin Access"])
+    # Using columns to create a centered "modal" card look
+    col1, col2, col3 = st.columns([1, 2, 1])
     
-    with tab1:
+    with col2:
+        st.markdown("<h2 style='text-align: center;'>🛡️ System Authentication</h2>", unsafe_allow_html=True)
         st.warning("⚠️ **NOTICE:** You must input your REAL NAME to access this system. Aliases, numbers, or fake names (e.g., 'test', 'bot') will be rejected and logged.")
-        user_name_input = st.text_input("Enter your Full Name:", key="user_name_input")
         
-        if st.button("Access System", type="primary"):
-            if not user_name_input:
-                st.error("Please enter a name.")
-            elif is_fake_name(user_name_input):
+        # Single Smart Input Box
+        user_input = st.text_input("Enter your Full Name (or Admin PIN):")
+        
+        if st.button("Enter System", use_container_width=True, type="primary"):
+            if not user_input:
+                st.error("Please enter a value.")
+            elif user_input == "091401":
+                # Admin bypass
+                st.session_state['logged_in'] = True
+                st.session_state['role'] = "Admin"
+                st.session_state['user_name'] = "Administrator"
+                log_system_access("Administrator", "Admin")
+                st.rerun()
+            elif is_fake_name(user_input):
+                # Fake name detection for Users
                 st.error("Access Denied: Invalid or fake name detected. Please use your real full name (No numbers allowed).")
+                log_system_access(f"FAILED LOGIN: {user_input}", "Rejected")
             else:
+                # Valid User login
                 st.session_state['logged_in'] = True
                 st.session_state['role'] = "User"
-                st.session_state['user_name'] = user_name_input
-                log_system_access(user_name_input, "User")
+                st.session_state['user_name'] = user_input.title()
+                log_system_access(user_input.title(), "User")
                 st.rerun()
                 
-    with tab2:
-        st.info("Authorized administrators only.")
-        admin_pin = st.text_input("Enter Secret PIN:", type="password")
-        admin_name = st.text_input("Enter Admin Name (For Logs):")
-        
-        if st.button("Unlock Admin Dashboard", type="primary"):
-            if admin_pin == "091401":
-                if admin_name:
-                    st.session_state['logged_in'] = True
-                    st.session_state['role'] = "Admin"
-                    st.session_state['user_name'] = admin_name
-                    log_system_access(admin_name, "Admin")
-                    st.rerun()
-                else:
-                    st.error("Please enter your name for the audit log.")
-            else:
-                st.error("Access Denied: Incorrect PIN.")
-    
     st.stop() # Stops the rest of the code from running until logged in
 
 # --- AUTO-LOAD SAVED SESSION ON STARTUP ---
@@ -158,7 +153,7 @@ def display_circular_logo(image_path):
         """
         st.sidebar.markdown(html_code, unsafe_allow_html=True)
     except FileNotFoundError:
-        pass # Silently pass if image is missing
+        pass
 
 display_circular_logo("449958530_878918900941660_1079343009849520447_n (2).jpg")
 
