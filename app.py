@@ -1,11 +1,33 @@
 import re
 import os
+import csv
+import socket
 import base64
+from datetime import datetime
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Molino 1 Filtering System", layout="wide", initial_sidebar_state="expanded")
+
+# --- CUSTOM CSS: WATERMARK ---
+st.markdown(
+    """
+    <style>
+    .watermark {
+        position: fixed;
+        bottom: 10px;
+        right: 15px;
+        font-size: 14px;
+        color: rgba(150, 150, 150, 0.7);
+        font-weight: bold;
+        z-index: 9999;
+    }
+    </style>
+    <div class="watermark">Made By China</div>
+    """,
+    unsafe_allow_html=True
+)
 
 # --- DISABLE 'CTRL + C' CLEAR CACHE POPUP ---
 components.html(
@@ -23,9 +45,95 @@ components.html(
     width=0,
 )
 
-# --- FILE PATHS FOR AUTO-SAVING PROGRESS ---
+# --- FILE PATHS ---
 DATA_FILE = "molino1_saved_data.csv"
 CONFIG_FILE = "molino1_config.txt"
+LOGS_FILE = "system_logs.csv"
+
+# --- AUTHENTICATION & LOGGING LOGIC ---
+def get_local_ip():
+    try:
+        hostname = socket.gethostname()
+        ip_address = socket.gethostbyname(hostname)
+        return ip_address
+    except:
+        return "Unknown IP"
+
+def log_system_access(name, role):
+    ip_addr = get_local_ip()
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    log_data = pd.DataFrame([{"Timestamp": timestamp, "Name": name, "Role": role, "IP Address": ip_addr}])
+    
+    if os.path.exists(LOGS_FILE):
+        log_data.to_csv(LOGS_FILE, mode='a', header=False, index=False)
+    else:
+        log_data.to_csv(LOGS_FILE, index=False)
+
+def is_fake_name(name):
+    lower_name = name.lower().strip()
+    forbidden_words = ["test", "admin123", "bot", "ai", "admin", "user", "guest"]
+    
+    # Check if exact forbidden word
+    if lower_name in forbidden_words:
+        return True
+    # Check if it contains numbers
+    if any(char.isdigit() for char in name):
+        return True
+    # Check length
+    if len(lower_name) < 2:
+        return True
+        
+    return False
+
+# --- LOGIN SCREEN ---
+if 'logged_in' not in st.session_state:
+    st.session_state['logged_in'] = False
+    st.session_state['role'] = None
+    st.session_state['user_name'] = ""
+
+if not st.session_state['logged_in']:
+    st.title("🛡️ System Authentication")
+    st.write("Welcome to the Molino 1 Filtering System. Please identify yourself to continue.")
+    st.divider()
+    
+    tab1, tab2 = st.tabs(["👤 Staff / User Login", "🔑 Admin Access"])
+    
+    with tab1:
+        st.warning("⚠️ **NOTICE:** You must input your REAL NAME to access this system. Aliases, numbers, or fake names (e.g., 'test', 'bot') will be rejected and logged.")
+        user_name_input = st.text_input("Enter your Full Name:", key="user_name_input")
+        
+        if st.button("Access System", type="primary"):
+            if not user_name_input:
+                st.error("Please enter a name.")
+            elif is_fake_name(user_name_input):
+                st.error("Access Denied: Invalid or fake name detected. Please use your real full name (No numbers allowed).")
+            else:
+                st.session_state['logged_in'] = True
+                st.session_state['role'] = "User"
+                st.session_state['user_name'] = user_name_input
+                log_system_access(user_name_input, "User")
+                st.rerun()
+                
+    with tab2:
+        st.info("Authorized administrators only.")
+        admin_pin = st.text_input("Enter Secret PIN:", type="password")
+        admin_name = st.text_input("Enter Admin Name (For Logs):")
+        
+        if st.button("Unlock Admin Dashboard", type="primary"):
+            if admin_pin == "091401":
+                if admin_name:
+                    st.session_state['logged_in'] = True
+                    st.session_state['role'] = "Admin"
+                    st.session_state['user_name'] = admin_name
+                    log_system_access(admin_name, "Admin")
+                    st.rerun()
+                else:
+                    st.error("Please enter your name for the audit log.")
+            else:
+                st.error("Access Denied: Incorrect PIN.")
+    
+    st.stop() # Stops the rest of the code from running until logged in
 
 # --- AUTO-LOAD SAVED SESSION ON STARTUP ---
 if 'processed_df' not in st.session_state and os.path.exists(DATA_FILE) and os.path.exists(CONFIG_FILE):
@@ -36,7 +144,7 @@ if 'processed_df' not in st.session_state and os.path.exists(DATA_FILE) and os.p
     except Exception as e:
         st.error("Error loading saved session. The file might be corrupted.")
 
-# --- SIDEBAR NAVIGATION WITH CIRCULAR LOGO ---
+# --- SIDEBAR NAVIGATION ---
 def display_circular_logo(image_path):
     try:
         with open(image_path, "rb") as image_file:
@@ -50,11 +158,22 @@ def display_circular_logo(image_path):
         """
         st.sidebar.markdown(html_code, unsafe_allow_html=True)
     except FileNotFoundError:
-        st.sidebar.warning("Logo image file not found. Please ensure the file name matches.")
+        pass # Silently pass if image is missing
 
 display_circular_logo("449958530_878918900941660_1079343009849520447_n (2).jpg")
 
-page = st.sidebar.radio("", ["Home", "Dashboard", "Filtering"])
+st.sidebar.success(f"Logged in as: **{st.session_state['user_name']}** ({st.session_state['role']})")
+
+# Dynamically build sidebar based on role
+nav_pages = ["Home", "Dashboard", "Filtering"]
+if st.session_state['role'] == "Admin":
+    nav_pages.append("System Logs 🔒")
+
+page = st.sidebar.radio("", nav_pages)
+
+if st.sidebar.button("Log Out"):
+    st.session_state.clear()
+    st.rerun()
 
 # --- FILTERING LOGIC ---
 def identify_subdivision(addr_str):
@@ -99,7 +218,6 @@ def identify_subdivision(addr_str):
     return "UNKNOWN"
 
 def evaluate_strike_address(addr_str):
-    # 1. Look for Explicit Phase Text
     explicit_phase = None
     ph1_match = re.search(r'\b(?:PHASE|PH|P)[\s\-]*1\b', addr_str)
     ph2_match = re.search(r'\b(?:PHASE|PH|P)[\s\-]*2\b', addr_str)
@@ -111,11 +229,9 @@ def evaluate_strike_address(addr_str):
     elif ph1_match and ph2_match:
         return None, "Needs Manual Review - Multiple Phases Detected"
         
-    # 2. Reject Blocks/Lots instantly for Strike
     if re.search(r'\b(?:BLK|BLOCK|LOT|L)[\s\-]*\d+', addr_str):
         return None, "Needs Manual Review - Block/Lot Format Found"
         
-    # 3. Safely Extract Unit Number
     unit_str = None
     unit_match = re.search(r'\b(?:UNIT|U|ROOM|RM|MUNIT)[\s\-#]*[A-Z]*(\d+)\b', addr_str)
     
@@ -130,7 +246,6 @@ def evaluate_strike_address(addr_str):
             if hash_match:
                 unit_str = hash_match.group(1)
                 
-    # 4. Fallback search (If no explicit word like 'UNIT' was used)
     if not unit_str:
         clean_addr = addr_str
         clean_addr = re.sub(r'\b(?:PHASE|PH|P)[\s\-]*[12I]+\b', '', clean_addr)
@@ -151,7 +266,6 @@ def evaluate_strike_address(addr_str):
         else:
             return None, "Needs Manual Review - No Valid Unit Number Found"
             
-    # 5. Calculate Expected Phase from Unit Number
     unit_num = int(unit_str)
     calc_phase = None
     if 1 <= unit_num <= 72:
@@ -162,7 +276,6 @@ def evaluate_strike_address(addr_str):
     if not calc_phase:
         return unit_str, "Needs Manual Review - Unit Out of Range"
         
-    # 6. CRITICAL FIX: Cross-reference Explicit Phase with Calculated Phase
     if explicit_phase is not None and explicit_phase != calc_phase:
         return unit_str, f"Needs Manual Review - Mismatch (Says PH {explicit_phase}, Unit {unit_num} is PH {calc_phase})"
         
@@ -226,166 +339,193 @@ if page == "Home":
                 
             st.success("File processed and saved securely to the system! Navigate to 'Dashboard' or 'Filtering' in the sidebar.")
 
-if page in ["Dashboard", "Filtering"] and 'processed_df' not in st.session_state:
-    st.warning("Please upload and process a file on the 'Home' page first.")
-
 # --- PAGE: DASHBOARD ---
-elif page == "Dashboard" and 'processed_df' in st.session_state:
-    st.title("System Dashboard")
-    st.write("Visual breakdown of the processed COMELEC data.")
-    
-    df = st.session_state['processed_df']
-    
-    st.subheader("Subdivision Insights")
-    filter_options = [
-        "All Records (Entire Molino 1)", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
-        "CIUDAD DE STRIKE (All Valid)", "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", 
-        "LUCKY VILLE", "MASUERTE ST.", "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES",
-        "PROGRESSIVE 17", "PROGRESSIVE 18", "PROGRESSIVE 20-21", "MOLINO ROAD", 
-        "VILLA FELICIA", "WOODESTATE", "Needs Manual Review", "Excluded"
-    ]
-    
-    selected_filter = st.selectbox("Select Subdivision or Category View:", filter_options)
-    
-    if selected_filter == "All Records (Entire Molino 1)":
-        view_df = df
-    elif selected_filter == "PHASE 1 ONLY (Strike)":
-        view_df = df[df['Category'] == 'PH 1']
-    elif selected_filter == "PHASE 2 ONLY (Strike)":
-        view_df = df[df['Category'] == 'PH 2']
-    elif selected_filter == "CIUDAD DE STRIKE (All Valid)":
-        view_df = df[df['Category'].isin(['PH 1', 'PH 2'])]
-    elif selected_filter == "Needs Manual Review":
-        view_df = df[df['Category'].str.startswith('Needs Manual Review')]
-    elif selected_filter == "Excluded":
-        view_df = df[df['Category'].str.startswith('Excluded')]
+elif page == "Dashboard":
+    if 'processed_df' not in st.session_state:
+        st.warning("Please upload and process a file on the 'Home' page first.")
     else:
-        view_df = df[df['Standardized_Subdivision'] == selected_filter]
+        st.title("System Dashboard")
+        st.write("Visual breakdown of the processed COMELEC data.")
         
-    st.divider()
-
-    st.subheader("Current View Metrics")
-    m1, m2, m3 = st.columns(3)
+        df = st.session_state['processed_df']
+        
+        st.subheader("Subdivision Insights")
+        filter_options = [
+            "All Records (Entire Molino 1)", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
+            "CIUDAD DE STRIKE (All Valid)", "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", 
+            "LUCKY VILLE", "MASUERTE ST.", "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES",
+            "PROGRESSIVE 17", "PROGRESSIVE 18", "PROGRESSIVE 20-21", "MOLINO ROAD", 
+            "VILLA FELICIA", "WOODESTATE", "Needs Manual Review", "Excluded"
+        ]
+        
+        selected_filter = st.selectbox("Select Subdivision or Category View:", filter_options)
+        
+        if selected_filter == "All Records (Entire Molino 1)":
+            view_df = df
+        elif selected_filter == "PHASE 1 ONLY (Strike)":
+            view_df = df[df['Category'] == 'PH 1']
+        elif selected_filter == "PHASE 2 ONLY (Strike)":
+            view_df = df[df['Category'] == 'PH 2']
+        elif selected_filter == "CIUDAD DE STRIKE (All Valid)":
+            view_df = df[df['Category'].isin(['PH 1', 'PH 2'])]
+        elif selected_filter == "Needs Manual Review":
+            view_df = df[df['Category'].str.startswith('Needs Manual Review')]
+        elif selected_filter == "Excluded":
+            view_df = df[df['Category'].str.startswith('Excluded')]
+        else:
+            view_df = df[df['Standardized_Subdivision'] == selected_filter]
+            
+        st.divider()
     
-    m1.metric(f"Total in {selected_filter[:15]}...", len(view_df))
-    valid_count_in_view = len(view_df[~view_df['Category'].str.startswith('Needs Manual') & ~view_df['Category'].str.startswith('Excluded')])
-    m2.metric("Categorized in View", valid_count_in_view)
-    global_pending = len(df[df['Category'].str.startswith('Needs Manual')])
-    m3.metric("Global Pending Review", global_pending)
-    
-    st.divider()
-    
-    if selected_filter == "All Records (Entire Molino 1)":
-        st.write("**Visual Breakdown: All Molino 1 Subdivisions**")
-        st.line_chart(view_df['Standardized_Subdivision'].value_counts())
-    else:
-        st.write(f"**Visual Breakdown: {selected_filter}**")
-        st.line_chart(view_df['Category'].value_counts())
+        st.subheader("Current View Metrics")
+        m1, m2, m3 = st.columns(3)
+        
+        m1.metric(f"Total in {selected_filter[:15]}...", len(view_df))
+        valid_count_in_view = len(view_df[~view_df['Category'].str.startswith('Needs Manual') & ~view_df['Category'].str.startswith('Excluded')])
+        m2.metric("Categorized in View", valid_count_in_view)
+        global_pending = len(df[df['Category'].str.startswith('Needs Manual')])
+        m3.metric("Global Pending Review", global_pending)
+        
+        st.divider()
+        
+        if selected_filter == "All Records (Entire Molino 1)":
+            st.write("**Visual Breakdown: All Molino 1 Subdivisions**")
+            st.line_chart(view_df['Standardized_Subdivision'].value_counts())
+        else:
+            st.write(f"**Visual Breakdown: {selected_filter}**")
+            st.line_chart(view_df['Category'].value_counts())
 
 # --- PAGE: FILTERING ---
-elif page == "Filtering" and 'processed_df' in st.session_state:
-    st.title("Data Filtering & Override")
-    st.write("Use the dropdown to fix multiple addresses at once, then click 'Save & Apply All Changes' to re-route them and automatically save your progress to the hard drive.")
-    
-    df = st.session_state['processed_df']
-    address_col = st.session_state['address_col']
-    
-    subdivision_options = [
-        "UNKNOWN", "CIUDAD DE STRIKE", "CIUDAD DE STRIKE (Force PH 1)", "CIUDAD DE STRIKE (Force PH 2)",
-        "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", "LUCKY VILLE", "MASUERTE ST.", 
-        "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES", "PROGRESSIVE 17", "PROGRESSIVE 18",
-        "PROGRESSIVE 20-21", "MOLINO ROAD", "VILLA FELICIA", "WOODESTATE"
-    ]
-    
-    filter_options = [
-        "Needs Manual Review", "All Records (Entire Molino 1)", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
-        "CIUDAD DE STRIKE (All Valid)", "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", 
-        "LUCKY VILLE", "MASUERTE ST.", "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES",
-        "PROGRESSIVE 17", "PROGRESSIVE 18", "PROGRESSIVE 20-21", "MOLINO ROAD", 
-        "VILLA FELICIA", "WOODESTATE", "Excluded"
-    ]
-    
-    selected_filter = st.selectbox("**Select Data View to Edit:**", filter_options)
-    
-    if selected_filter == "All Records (Entire Molino 1)":
-        view_df = df
-    elif selected_filter == "PHASE 1 ONLY (Strike)":
-        view_df = df[df['Category'] == 'PH 1']
-    elif selected_filter == "PHASE 2 ONLY (Strike)":
-        view_df = df[df['Category'] == 'PH 2']
-    elif selected_filter == "CIUDAD DE STRIKE (All Valid)":
-        view_df = df[df['Category'].isin(['PH 1', 'PH 2'])]
-    elif selected_filter == "Needs Manual Review":
-        view_df = df[df['Category'].str.startswith('Needs Manual Review')]
-    elif selected_filter == "Excluded":
-        view_df = df[df['Category'].str.startswith('Excluded')]
+elif page == "Filtering":
+    if 'processed_df' not in st.session_state:
+        st.warning("Please upload and process a file on the 'Home' page first.")
     else:
-        view_df = df[df['Standardized_Subdivision'] == selected_filter]
+        st.title("Data Filtering & Override")
+        st.write("Use the dropdown to fix multiple addresses at once, then click 'Save & Apply All Changes' to re-route them and automatically save your progress to the hard drive.")
+        
+        df = st.session_state['processed_df']
+        address_col = st.session_state['address_col']
+        
+        subdivision_options = [
+            "UNKNOWN", "CIUDAD DE STRIKE", "CIUDAD DE STRIKE (Force PH 1)", "CIUDAD DE STRIKE (Force PH 2)",
+            "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", "LUCKY VILLE", "MASUERTE ST.", 
+            "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES", "PROGRESSIVE 17", "PROGRESSIVE 18",
+            "PROGRESSIVE 20-21", "MOLINO ROAD", "VILLA FELICIA", "WOODESTATE"
+        ]
+        
+        filter_options = [
+            "Needs Manual Review", "All Records (Entire Molino 1)", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
+            "CIUDAD DE STRIKE (All Valid)", "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", 
+            "LUCKY VILLE", "MASUERTE ST.", "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES",
+            "PROGRESSIVE 17", "PROGRESSIVE 18", "PROGRESSIVE 20-21", "MOLINO ROAD", 
+            "VILLA FELICIA", "WOODESTATE", "Excluded"
+        ]
+        
+        selected_filter = st.selectbox("**Select Data View to Edit:**", filter_options)
+        
+        if selected_filter == "All Records (Entire Molino 1)":
+            view_df = df
+        elif selected_filter == "PHASE 1 ONLY (Strike)":
+            view_df = df[df['Category'] == 'PH 1']
+        elif selected_filter == "PHASE 2 ONLY (Strike)":
+            view_df = df[df['Category'] == 'PH 2']
+        elif selected_filter == "CIUDAD DE STRIKE (All Valid)":
+            view_df = df[df['Category'].isin(['PH 1', 'PH 2'])]
+        elif selected_filter == "Needs Manual Review":
+            view_df = df[df['Category'].str.startswith('Needs Manual Review')]
+        elif selected_filter == "Excluded":
+            view_df = df[df['Category'].str.startswith('Excluded')]
+        else:
+            view_df = df[df['Standardized_Subdivision'] == selected_filter]
+        
+        if st.button("🔄 Save & Apply All Changes", type="primary"):
+            if 'edited_df_state' in st.session_state:
+                edited_df_current = st.session_state['edited_df_state']
+                changed_indices = edited_df_current[edited_df_current['Standardized_Subdivision'] != view_df['Standardized_Subdivision']].index
+                
+                for idx in changed_indices:
+                    new_sub = edited_df_current.at[idx, 'Standardized_Subdivision']
+                    
+                    if new_sub == "UNKNOWN":
+                        df.at[idx, 'Standardized_Subdivision'] = "UNKNOWN"
+                        df.at[idx, 'Category'] = "Needs Manual Review - Unknown Subdivision / Street"
+                    
+                    elif new_sub == "CIUDAD DE STRIKE":
+                        df.at[idx, 'Standardized_Subdivision'] = "CIUDAD DE STRIKE"
+                        parsed = parse_address(df.at[idx, address_col])
+                        df.at[idx, 'Strike_Evaluated_Unit'] = parsed.iloc[1]
+                        df.at[idx, 'Category'] = parsed.iloc[3]
+                        df.at[idx, 'Is_Valid_Molino_1'] = True
+                        
+                    elif new_sub == "CIUDAD DE STRIKE (Force PH 1)":
+                        df.at[idx, 'Standardized_Subdivision'] = "CIUDAD DE STRIKE"
+                        df.at[idx, 'Category'] = "PH 1"
+                        df.at[idx, 'Is_Valid_Molino_1'] = True
+                        df.at[idx, 'Strike_Evaluated_Unit'] = None
+                        
+                    elif new_sub == "CIUDAD DE STRIKE (Force PH 2)":
+                        df.at[idx, 'Standardized_Subdivision'] = "CIUDAD DE STRIKE"
+                        df.at[idx, 'Category'] = "PH 2"
+                        df.at[idx, 'Is_Valid_Molino_1'] = True
+                        df.at[idx, 'Strike_Evaluated_Unit'] = None
+                        
+                    else:
+                        df.at[idx, 'Standardized_Subdivision'] = new_sub
+                        df.at[idx, 'Category'] = new_sub
+                        df.at[idx, 'Is_Valid_Molino_1'] = True
+                        df.at[idx, 'Strike_Evaluated_Unit'] = None
+                
+                df.to_csv(DATA_FILE, index=False)
+                
+                st.session_state['processed_df'] = df
+                st.success("Progress saved successfully to the system!")
+                st.rerun()
     
-    if st.button("🔄 Save & Apply All Changes", type="primary"):
-        if 'edited_df_state' in st.session_state:
-            edited_df_current = st.session_state['edited_df_state']
-            changed_indices = edited_df_current[edited_df_current['Standardized_Subdivision'] != view_df['Standardized_Subdivision']].index
-            
-            for idx in changed_indices:
-                new_sub = edited_df_current.at[idx, 'Standardized_Subdivision']
-                
-                if new_sub == "UNKNOWN":
-                    df.at[idx, 'Standardized_Subdivision'] = "UNKNOWN"
-                    df.at[idx, 'Category'] = "Needs Manual Review - Unknown Subdivision / Street"
-                
-                elif new_sub == "CIUDAD DE STRIKE":
-                    df.at[idx, 'Standardized_Subdivision'] = "CIUDAD DE STRIKE"
-                    parsed = parse_address(df.at[idx, address_col])
-                    df.at[idx, 'Strike_Evaluated_Unit'] = parsed.iloc[1]
-                    df.at[idx, 'Category'] = parsed.iloc[3]
-                    df.at[idx, 'Is_Valid_Molino_1'] = True
-                    
-                elif new_sub == "CIUDAD DE STRIKE (Force PH 1)":
-                    df.at[idx, 'Standardized_Subdivision'] = "CIUDAD DE STRIKE"
-                    df.at[idx, 'Category'] = "PH 1"
-                    df.at[idx, 'Is_Valid_Molino_1'] = True
-                    df.at[idx, 'Strike_Evaluated_Unit'] = None
-                    
-                elif new_sub == "CIUDAD DE STRIKE (Force PH 2)":
-                    df.at[idx, 'Standardized_Subdivision'] = "CIUDAD DE STRIKE"
-                    df.at[idx, 'Category'] = "PH 2"
-                    df.at[idx, 'Is_Valid_Molino_1'] = True
-                    df.at[idx, 'Strike_Evaluated_Unit'] = None
-                    
-                else:
-                    df.at[idx, 'Standardized_Subdivision'] = new_sub
-                    df.at[idx, 'Category'] = new_sub
-                    df.at[idx, 'Is_Valid_Molino_1'] = True
-                    df.at[idx, 'Strike_Evaluated_Unit'] = None
-            
-            df.to_csv(DATA_FILE, index=False)
-            
-            st.session_state['processed_df'] = df
-            st.success("Progress saved successfully to the system!")
-            st.rerun()
+        disabled_cols = [address_col, 'Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Category']
+        
+        st.session_state['edited_df_state'] = st.data_editor(
+            view_df, 
+            use_container_width=True, 
+            disabled=disabled_cols,
+            column_config={
+                "Standardized_Subdivision": st.column_config.SelectboxColumn(
+                    "Standardized_Subdivision",
+                    help="Select to automatically move the address to the correct subdivision",
+                    options=subdivision_options,
+                    required=True
+                )
+            }
+        )
+        
+        st.divider()
+        csv_file = view_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label=f"Export Data to CSV",
+            data=csv_file,
+            file_name=f"Molino1_{selected_filter.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')}.csv",
+            mime="text/csv"
+        )
 
-    disabled_cols = [address_col, 'Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Category']
+# --- PAGE: SYSTEM LOGS (ADMIN ONLY) ---
+elif page == "System Logs 🔒":
+    st.title("🛡️ System Access Logs")
+    st.write("Complete audit trail of everyone who has logged into the Master Filtering System.")
     
-    st.session_state['edited_df_state'] = st.data_editor(
-        view_df, 
-        use_container_width=True, 
-        disabled=disabled_cols,
-        column_config={
-            "Standardized_Subdivision": st.column_config.SelectboxColumn(
-                "Standardized_Subdivision",
-                help="Select to automatically move the address to the correct subdivision",
-                options=subdivision_options,
-                required=True
-            )
-        }
-    )
-    
-    st.divider()
-    csv = view_df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label=f"Export Data to CSV",
-        data=csv,
-        file_name=f"Molino1_{selected_filter.replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '')}.csv",
-        mime="text/csv"
-    )
+    if os.path.exists(LOGS_FILE):
+        logs_df = pd.read_csv(LOGS_FILE)
+        
+        # Reverse to show newest logins first
+        logs_df = logs_df.iloc[::-1].reset_index(drop=True)
+        
+        st.dataframe(logs_df, use_container_width=True)
+        
+        st.divider()
+        csv_logs = logs_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download Complete Security Log",
+            data=csv_logs,
+            file_name="Molino1_System_Logs.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("No system logs found yet. The file will be created automatically when someone logs in.")
