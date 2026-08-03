@@ -162,7 +162,7 @@ st.sidebar.success(f"Logged in as: **{st.session_state['user_name']}** ({st.sess
 # Dynamically build sidebar based on role
 nav_pages = ["Home", "Dashboard", "Filtering"]
 if st.session_state['role'] == "Admin":
-    nav_pages.append("System Logs 🔒")
+    nav_pages.append("System Logs")
 
 page = st.sidebar.radio("", nav_pages)
 
@@ -502,8 +502,8 @@ elif page == "Filtering":
         )
 
 # --- PAGE: SYSTEM LOGS (ADMIN ONLY) ---
-elif page == "System Logs 🔒":
-    st.title("🛡️ System Access Logs")
+elif page == "System Logs":
+    st.title("System Access Logs")
     st.write("Complete audit trail of everyone who has logged into the Master Filtering System.")
     
     if os.path.exists(LOGS_FILE):
