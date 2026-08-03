@@ -100,11 +100,11 @@ if not st.session_state['logged_in']:
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown("<h2 style='text-align: center;'>🛡️ System Authentication</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>System Authentication</h2>", unsafe_allow_html=True)
         st.warning("⚠️ **NOTICE:** You must input your REAL NAME to access this system. Aliases, numbers, or fake names (e.g., 'test', 'bot') will be rejected and logged.")
         
         # Single Smart Input Box
-        user_input = st.text_input("Enter your Full Name (or Admin PIN):")
+        user_input = st.text_input("Enter your Name:")
         
         if st.button("Enter System", use_container_width=True, type="primary"):
             if not user_input:
