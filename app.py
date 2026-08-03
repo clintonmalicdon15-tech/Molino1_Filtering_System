@@ -37,7 +37,6 @@ def display_circular_logo(image_path):
 
 display_circular_logo("449958530_878918900941660_1079343009849520447_n (2).jpg")
 
-# Navigation title removed as requested
 page = st.sidebar.radio("", ["Home", "Dashboard", "Filtering"])
 
 # --- FILTERING LOGIC ---
@@ -98,53 +97,67 @@ def parse_address(address):
         return pd.Series([True, None, subdivision, subdivision])
         
     unit_str = None
-    clean_unit_str = None
     category = "Needs Manual Review - No Number Found" 
         
+    # 1. Look for explicitly stated units (UNIT 12, RM 12)
     unit_match = re.search(r'\b(?:UNIT|U|ROOM|RM|MUNIT)[\s\-#]*[A-Z]*(\d+(?:-\d+)?)', addr_str)
     if unit_match:
         unit_str = unit_match.group(1)
     else:
+        # 2. Look for BLDG [num] DASH [unit] format (e.g., BLDG 5 - 12)
         bldg_dash_match = re.search(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s#]*\d+[\s\-]+(\d+(?:-\d+)?)', addr_str)
         if bldg_dash_match:
             unit_str = bldg_dash_match.group(1)
         else:
+            # 3. Look for # [unit] (Ensuring it's not part of BLDG #)
             hash_match = re.search(r'(?<!B)(?<!BLDG)(?<!BLG)(?<!BUILDING)(?<!BUILDUING)(?<!BULIDING)[\s\-]*#[\s\-]*[A-Z]*(\d+(?:-\d+)?)', addr_str)
             if hash_match:
                 unit_str = hash_match.group(1)
             
+    # 4. Fallback search (Safe Extraction)
     if not unit_str:
-        leading_match = re.search(r'\b(\d+(?:-\d+)?)[\s\-]*(?:(?:PHASE|PH|P)[\s\-]*[12I]+[\s\-]*)?(?:B|BLDG|BLG|BUILDING|BUILDUING|BULIDING)\.?', addr_str)
-        if leading_match:
-            unit_str = leading_match.group(1)
-
-    if not unit_str:
+        # Erase Phase Numbers and Building Numbers so they aren't confused as units
         clean_addr = re.sub(r'\b(?:PHASE|PH|P)[\s\-]*[12I]+\b', '', addr_str)
         clean_addr = re.sub(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s\-#]*\d+\b', '', clean_addr)
-        standalone_nums = re.findall(r'\b\d+\b', clean_addr)
-        for num_str in standalone_nums:
-            num = int(num_str)
-            if 1 <= num <= 72 or 101 <= num <= 324:
-                unit_str = num_str
-                break
-
-    if unit_str:
-        clean_unit_str = unit_str.replace("-", "")
-        unit_num = int(clean_unit_str)
         
-        if 1 <= unit_num <= 72:
-            category = "PH 1"
-        elif 101 <= unit_num <= 324:
-            category = "PH 2"
-        else:
-            category = "Needs Manual Review - Out of Range"
+        # Look for remaining standalone numbers
+        standalone_nums = re.findall(r'\b\d+(?:-\d+)?\b', clean_addr)
+        
+        for num_str in standalone_nums:
+            try:
+                # Check the first number in case of ranges like "12-14"
+                check_num = int(num_str.split('-')[0])
+                if (1 <= check_num <= 72) or (101 <= check_num <= 324):
+                    unit_str = num_str
+                    break
+            except ValueError:
+                continue
+
+    # Evaluate the found unit
+    if unit_str:
+        # Handle cases like "12-14" by isolating the primary unit number
+        primary_unit_str = unit_str.split('-')[0]
+        clean_unit_str = re.sub(r'[^0-9]', '', primary_unit_str)
+        
+        try:
+            unit_num = int(clean_unit_str)
+            
+            if 1 <= unit_num <= 72:
+                category = "PH 1"
+            elif 101 <= unit_num <= 324:
+                category = "PH 2"
+            else:
+                category = "Needs Manual Review - Out of Range"
+        except ValueError:
+            category = "Needs Manual Review - Invalid Format"
     else:
+        # Specifically identify WHY it failed for manual review
         if re.search(r'\b(?:LOT|L|BLOCK|BLK)\b', addr_str):
             category = "Needs Manual Review - Block/Lot Format"
         elif re.search(r'\b(?:BLDG|BUILDING|BUILDUING|BULIDING|BLG|B)\.?[\s\-#]*\d+', addr_str):
             category = "Needs Manual Review - Only Bldg Number Found"
                 
-    return pd.Series([True, clean_unit_str, subdivision, category])
+    return pd.Series([True, unit_str, subdivision, category])
 
 
 # --- PAGE: HOME ---
@@ -152,7 +165,6 @@ if page == "Home":
     st.title("Molino 1 Master Filtering System")
     st.write("Welcome to the automated categorization system for COMELEC addresses in Barangay Molino 1.")
     
-    # Google Docs Guidelines Link Callout
     st.info("📖 **[Click here to view the Official System Guidelines & Documentation](https://docs.google.com/document/d/1dJ_UXOew4EFtwTX6FqOZnj_98x6DweSlJLoO2Iwi8Io/edit?usp=sharing)**")
     
     if 'processed_df' in st.session_state:
