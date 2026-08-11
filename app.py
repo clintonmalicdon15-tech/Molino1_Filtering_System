@@ -103,7 +103,7 @@ if not st.session_state['logged_in']:
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown("<h2 style='text-align: center;'>🛡️ System Authentication</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>System Authentication</h2>", unsafe_allow_html=True)
         st.warning("⚠️ **NOTICE:** You must input your REAL NAME to access this system. Aliases, numbers, or fake names (e.g., 'test', 'bot') will be rejected and logged.")
         
         # Single Smart Input Box
@@ -165,7 +165,7 @@ st.sidebar.success(f"Logged in as: **{st.session_state['user_name']}** ({st.sess
 # Dynamically build sidebar based on role
 nav_pages = ["Home", "Dashboard", "Filtering"]
 if st.session_state['role'] == "Admin":
-    nav_pages.append("System Logs 🔒")
+    nav_pages.append("System Logs")
 
 page = st.sidebar.radio("", nav_pages)
 
