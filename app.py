@@ -66,24 +66,25 @@ def log_system_access(name, role):
     pht_tz = timezone(timedelta(hours=8))
     timestamp = datetime.now(pht_tz).strftime("%B %d, %Y - %I:%M:%S %p")
     
-    log_data = pd.DataFrame([{"Timestamp": timestamp, "Name": name, "Role": role, "IP Address": ip_addr}])
+    file_exists = os.path.exists(LOGS_FILE)
     
-    if os.path.exists(LOGS_FILE):
-        log_data.to_csv(LOGS_FILE, mode='a', header=False, index=False)
-    else:
-        log_data.to_csv(LOGS_FILE, index=False)
+    # Write to CSV with immediate disk flush so logs display instantly
+    with open(LOGS_FILE, mode='a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["Timestamp", "Name", "Role", "IP Address"])
+        writer.writerow([timestamp, name, role, ip_addr])
+        f.flush()
+        os.fsync(f.fileno())
 
 def is_fake_name(name):
     lower_name = name.lower().strip()
     forbidden_words = ["test", "admin123", "bot", "ai", "admin", "user", "guest"]
     
-    # Check if exact forbidden word
     if lower_name in forbidden_words:
         return True
-    # Check if it contains numbers
     if any(char.isdigit() for char in name):
         return True
-    # Check length
     if len(lower_name) < 2:
         return True
         
@@ -96,42 +97,36 @@ if 'logged_in' not in st.session_state:
     st.session_state['user_name'] = ""
 
 if not st.session_state['logged_in']:
-    # Adding some vertical space to center the "modal"
     st.write("<br><br><br>", unsafe_allow_html=True)
     
-    # Using columns to create a centered "modal" card look
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.markdown("<h2 style='text-align: center;'>System Authentication</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>🛡️ System Authentication</h2>", unsafe_allow_html=True)
         st.warning("⚠️ **NOTICE:** You must input your REAL NAME to access this system. Aliases, numbers, or fake names (e.g., 'test', 'bot') will be rejected and logged.")
         
-        # Single Smart Input Box
         user_input = st.text_input("Enter your Full Name (or Admin PIN):")
         
         if st.button("Enter System", use_container_width=True, type="primary"):
             if not user_input:
                 st.error("Please enter a value.")
             elif user_input == "091401":
-                # Admin bypass
                 st.session_state['logged_in'] = True
                 st.session_state['role'] = "Admin"
                 st.session_state['user_name'] = "Administrator"
                 log_system_access("Administrator", "Admin")
                 st.rerun()
             elif is_fake_name(user_input):
-                # Fake name detection for Users
                 st.error("Access Denied: Invalid or fake name detected. Please use your real full name (No numbers allowed).")
                 log_system_access(f"FAILED LOGIN: {user_input}", "Rejected")
             else:
-                # Valid User login
                 st.session_state['logged_in'] = True
                 st.session_state['role'] = "User"
                 st.session_state['user_name'] = user_input.title()
                 log_system_access(user_input.title(), "User")
                 st.rerun()
                 
-    st.stop() # Stops the rest of the code from running until logged in
+    st.stop()
 
 # --- AUTO-LOAD SAVED SESSION ON STARTUP ---
 if 'processed_df' not in st.session_state and os.path.exists(DATA_FILE) and os.path.exists(CONFIG_FILE):
@@ -162,10 +157,9 @@ display_circular_logo("449958530_878918900941660_1079343009849520447_n (2).jpg")
 
 st.sidebar.success(f"Logged in as: **{st.session_state['user_name']}** ({st.session_state['role']})")
 
-# Dynamically build sidebar based on role
 nav_pages = ["Home", "Dashboard", "Filtering"]
 if st.session_state['role'] == "Admin":
-    nav_pages.append("System Logs")
+    nav_pages.append("System Logs 🔒")
 
 page = st.sidebar.radio("", nav_pages)
 
@@ -510,20 +504,26 @@ elif page == "System Logs 🔒":
     st.write("Complete audit trail of everyone who has logged into the Master Filtering System.")
     
     if os.path.exists(LOGS_FILE):
-        logs_df = pd.read_csv(LOGS_FILE)
-        
-        # Reverse to show newest logins first
-        logs_df = logs_df.iloc[::-1].reset_index(drop=True)
-        
-        st.dataframe(logs_df, use_container_width=True)
-        
-        st.divider()
-        csv_logs = logs_df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="Download Complete Security Log",
-            data=csv_logs,
-            file_name="Molino1_System_Logs.csv",
-            mime="text/csv"
-        )
+        try:
+            # Always force fresh read directly from disk
+            logs_df = pd.read_csv(LOGS_FILE)
+            
+            if not logs_df.empty:
+                # Reverse to display newest logins at the very top
+                logs_df = logs_df.iloc[::-1].reset_index(drop=True)
+                st.dataframe(logs_df, use_container_width=True)
+                
+                st.divider()
+                csv_logs = logs_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download Complete Security Log",
+                    data=csv_logs,
+                    file_name="Molino1_System_Logs.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info("Log file exists but contains no records yet.")
+        except Exception as e:
+            st.error(f"Error reading log file: {e}")
     else:
         st.info("No system logs found yet. The file will be created automatically when someone logs in.")
