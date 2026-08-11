@@ -131,7 +131,15 @@ if not st.session_state['logged_in']:
 # --- AUTO-LOAD SAVED SESSION ON STARTUP ---
 if 'processed_df' not in st.session_state and os.path.exists(DATA_FILE) and os.path.exists(CONFIG_FILE):
     try:
-        st.session_state['processed_df'] = pd.read_csv(DATA_FILE)
+        # Enforce object dtypes to prevent Pandas TypeError crashes on reload
+        st.session_state['processed_df'] = pd.read_csv(
+            DATA_FILE, 
+            dtype={
+                'Strike_Evaluated_Unit': 'object', 
+                'Standardized_Subdivision': 'object', 
+                'Category': 'object'
+            }
+        )
         with open(CONFIG_FILE, "r") as f:
             st.session_state['address_col'] = f.read().strip()
     except Exception as e:
@@ -321,6 +329,11 @@ if page == "Home":
         
         if st.button("Run Initial Filter", type="primary"):
             df[['Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Standardized_Subdivision', 'Category']] = df[address_col].apply(parse_address)
+            
+            # Enforce object type immediately after creation to prevent future errors
+            df['Strike_Evaluated_Unit'] = df['Strike_Evaluated_Unit'].astype(object)
+            df['Standardized_Subdivision'] = df['Standardized_Subdivision'].astype(object)
+            df['Category'] = df['Category'].astype(object)
             
             st.session_state['processed_df'] = df
             st.session_state['address_col'] = address_col
