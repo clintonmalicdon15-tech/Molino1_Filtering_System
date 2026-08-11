@@ -441,50 +441,50 @@ elif page == "Filtering":
                 ].index
                 
                 for idx in changed_indices:
-                    new_addr = edited_df_current.at[idx, address_col]
-                    old_addr = view_df.at[idx, address_col]
-                    new_sub = edited_df_current.at[idx, 'Standardized_Subdivision']
-                    old_sub = view_df.at[idx, 'Standardized_Subdivision']
+                    new_addr = edited_df_current.loc[idx, address_col]
+                    old_addr = view_df.loc[idx, address_col]
+                    new_sub = edited_df_current.loc[idx, 'Standardized_Subdivision']
+                    old_sub = view_df.loc[idx, 'Standardized_Subdivision']
                     
-                    # Always commit text changes to the main dataframe
+                    # Always commit text changes to the main dataframe using .loc
                     if new_addr != old_addr:
-                        df.at[idx, address_col] = new_addr
+                        df.loc[idx, address_col] = new_addr
                     
                     # Scenario 1: They fixed the text, but left the dropdown alone
                     if new_addr != old_addr and new_sub == old_sub:
                         parsed = parse_address(new_addr)
-                        df.at[idx, 'Is_Valid_Molino_1'] = parsed.iloc[0]
-                        df.at[idx, 'Strike_Evaluated_Unit'] = parsed.iloc[1]
-                        df.at[idx, 'Standardized_Subdivision'] = parsed.iloc[2]
-                        df.at[idx, 'Category'] = parsed.iloc[3]
+                        df.loc[idx, 'Is_Valid_Molino_1'] = parsed.iloc[0]
+                        df.loc[idx, 'Strike_Evaluated_Unit'] = parsed.iloc[1]
+                        df.loc[idx, 'Standardized_Subdivision'] = parsed.iloc[2]
+                        df.loc[idx, 'Category'] = parsed.iloc[3]
                         
                     # Scenario 2: They changed the dropdown override
                     else:
-                        df.at[idx, 'Standardized_Subdivision'] = new_sub
+                        df.loc[idx, 'Standardized_Subdivision'] = new_sub
                         
                         if new_sub == "UNKNOWN":
-                            df.at[idx, 'Category'] = "Needs Manual Review - Unknown Subdivision / Street"
+                            df.loc[idx, 'Category'] = "Needs Manual Review - Unknown Subdivision / Street"
                         
                         elif new_sub == "CIUDAD DE STRIKE":
                             parsed = parse_address(new_addr)
-                            df.at[idx, 'Strike_Evaluated_Unit'] = parsed.iloc[1]
-                            df.at[idx, 'Category'] = parsed.iloc[3]
-                            df.at[idx, 'Is_Valid_Molino_1'] = True
+                            df.loc[idx, 'Strike_Evaluated_Unit'] = parsed.iloc[1]
+                            df.loc[idx, 'Category'] = parsed.iloc[3]
+                            df.loc[idx, 'Is_Valid_Molino_1'] = True
                             
                         elif new_sub == "CIUDAD DE STRIKE (Force PH 1)":
-                            df.at[idx, 'Category'] = "PH 1"
-                            df.at[idx, 'Is_Valid_Molino_1'] = True
-                            df.at[idx, 'Strike_Evaluated_Unit'] = None
+                            df.loc[idx, 'Category'] = "PH 1"
+                            df.loc[idx, 'Is_Valid_Molino_1'] = True
+                            df.loc[idx, 'Strike_Evaluated_Unit'] = None
                             
                         elif new_sub == "CIUDAD DE STRIKE (Force PH 2)":
-                            df.at[idx, 'Category'] = "PH 2"
-                            df.at[idx, 'Is_Valid_Molino_1'] = True
-                            df.at[idx, 'Strike_Evaluated_Unit'] = None
+                            df.loc[idx, 'Category'] = "PH 2"
+                            df.loc[idx, 'Is_Valid_Molino_1'] = True
+                            df.loc[idx, 'Strike_Evaluated_Unit'] = None
                             
                         else:
-                            df.at[idx, 'Category'] = new_sub
-                            df.at[idx, 'Is_Valid_Molino_1'] = True
-                            df.at[idx, 'Strike_Evaluated_Unit'] = None
+                            df.loc[idx, 'Category'] = new_sub
+                            df.loc[idx, 'Is_Valid_Molino_1'] = True
+                            df.loc[idx, 'Strike_Evaluated_Unit'] = None
                 
                 df.to_csv(DATA_FILE, index=False)
                 
