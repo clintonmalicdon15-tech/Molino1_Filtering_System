@@ -343,7 +343,7 @@ elif page == "Dashboard":
         
         st.subheader("Subdivision Insights")
         filter_options = [
-            "All Records (Entire Molino 1)", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
+            "All Records (Entire Molino 1)", "All Valid Categorized Records", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
             "CIUDAD DE STRIKE (All Valid)", "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", 
             "LUCKY VILLE", "MASUERTE ST.", "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES",
             "PROGRESSIVE 17", "PROGRESSIVE 18", "PROGRESSIVE 20-21", "MOLINO ROAD", 
@@ -354,6 +354,8 @@ elif page == "Dashboard":
         
         if selected_filter == "All Records (Entire Molino 1)":
             view_df = df
+        elif selected_filter == "All Valid Categorized Records":
+            view_df = df[~df['Category'].str.startswith('Needs Manual') & ~df['Category'].str.startswith('Excluded')]
         elif selected_filter == "PHASE 1 ONLY (Strike)":
             view_df = df[df['Category'] == 'PH 1']
         elif selected_filter == "PHASE 2 ONLY (Strike)":
@@ -380,8 +382,8 @@ elif page == "Dashboard":
         
         st.divider()
         
-        if selected_filter == "All Records (Entire Molino 1)":
-            st.write("**Visual Breakdown: All Molino 1 Subdivisions**")
+        if selected_filter == "All Records (Entire Molino 1)" or selected_filter == "All Valid Categorized Records":
+            st.write(f"**Visual Breakdown: {selected_filter}**")
             st.line_chart(view_df['Standardized_Subdivision'].value_counts())
         else:
             st.write(f"**Visual Breakdown: {selected_filter}**")
@@ -406,7 +408,7 @@ elif page == "Filtering":
         ]
         
         filter_options = [
-            "Needs Manual Review", "All Records (Entire Molino 1)", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
+            "Needs Manual Review", "All Records (Entire Molino 1)", "All Valid Categorized Records", "PHASE 1 ONLY (Strike)", "PHASE 2 ONLY (Strike)",
             "CIUDAD DE STRIKE (All Valid)", "CAMELLA LESSANDRA", "GREEN RIDGE", "KRAUSE PARK", 
             "LUCKY VILLE", "MASUERTE ST.", "NEW BETTER LANDSCAPE", "ORIENT VILLE", "PAULA HOMES",
             "PROGRESSIVE 17", "PROGRESSIVE 18", "PROGRESSIVE 20-21", "MOLINO ROAD", 
@@ -417,6 +419,8 @@ elif page == "Filtering":
         
         if selected_filter == "All Records (Entire Molino 1)":
             view_df = df
+        elif selected_filter == "All Valid Categorized Records":
+            view_df = df[~df['Category'].str.startswith('Needs Manual') & ~df['Category'].str.startswith('Excluded')]
         elif selected_filter == "PHASE 1 ONLY (Strike)":
             view_df = df[df['Category'] == 'PH 1']
         elif selected_filter == "PHASE 2 ONLY (Strike)":
@@ -434,7 +438,6 @@ elif page == "Filtering":
             if 'edited_df_state' in st.session_state:
                 edited_df_current = st.session_state['edited_df_state']
                 
-                # Check for changes in EITHER the address column OR the dropdown column
                 changed_indices = edited_df_current[
                     (edited_df_current['Standardized_Subdivision'] != view_df['Standardized_Subdivision']) |
                     (edited_df_current[address_col] != view_df[address_col])
@@ -446,11 +449,9 @@ elif page == "Filtering":
                     new_sub = edited_df_current.loc[idx, 'Standardized_Subdivision']
                     old_sub = view_df.loc[idx, 'Standardized_Subdivision']
                     
-                    # Always commit text changes to the main dataframe using .loc
                     if new_addr != old_addr:
                         df.loc[idx, address_col] = new_addr
                     
-                    # Scenario 1: They fixed the text, but left the dropdown alone
                     if new_addr != old_addr and new_sub == old_sub:
                         parsed = parse_address(new_addr)
                         df.loc[idx, 'Is_Valid_Molino_1'] = parsed.iloc[0]
@@ -458,7 +459,6 @@ elif page == "Filtering":
                         df.loc[idx, 'Standardized_Subdivision'] = parsed.iloc[2]
                         df.loc[idx, 'Category'] = parsed.iloc[3]
                         
-                    # Scenario 2: They changed the dropdown override
                     else:
                         df.loc[idx, 'Standardized_Subdivision'] = new_sub
                         
@@ -492,7 +492,6 @@ elif page == "Filtering":
                 st.success("Progress saved successfully to the system!")
                 st.rerun()
     
-        # Removed address_col from disabled_cols so it can be edited by the user
         disabled_cols = ['Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Category']
         
         st.session_state['edited_df_state'] = st.data_editor(
@@ -525,11 +524,9 @@ elif page == "System Logs 🔒":
     
     if os.path.exists(LOGS_FILE):
         try:
-            # Always force fresh read directly from disk
             logs_df = pd.read_csv(LOGS_FILE)
             
             if not logs_df.empty:
-                # Reverse to display newest logins at the very top
                 logs_df = logs_df.iloc[::-1].reset_index(drop=True)
                 st.dataframe(logs_df, use_container_width=True)
                 
