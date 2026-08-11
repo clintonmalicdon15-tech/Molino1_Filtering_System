@@ -393,7 +393,7 @@ elif page == "Filtering":
         st.warning("Please upload and process a file on the 'Home' page first.")
     else:
         st.title("Data Filtering & Override")
-        st.write("Use the dropdown to fix multiple addresses at once, then click 'Save & Apply All Changes' to re-route them and automatically save your progress to the hard drive.")
+        st.write("Double-click an address text to edit it, or use the dropdown to override its categorization. Click Save when finished.")
         
         df = st.session_state['processed_df']
         address_col = st.session_state['address_col']
@@ -433,39 +433,58 @@ elif page == "Filtering":
         if st.button("🔄 Save & Apply All Changes", type="primary"):
             if 'edited_df_state' in st.session_state:
                 edited_df_current = st.session_state['edited_df_state']
-                changed_indices = edited_df_current[edited_df_current['Standardized_Subdivision'] != view_df['Standardized_Subdivision']].index
+                
+                # Check for changes in EITHER the address column OR the dropdown column
+                changed_indices = edited_df_current[
+                    (edited_df_current['Standardized_Subdivision'] != view_df['Standardized_Subdivision']) |
+                    (edited_df_current[address_col] != view_df[address_col])
+                ].index
                 
                 for idx in changed_indices:
+                    new_addr = edited_df_current.at[idx, address_col]
+                    old_addr = view_df.at[idx, address_col]
                     new_sub = edited_df_current.at[idx, 'Standardized_Subdivision']
+                    old_sub = view_df.at[idx, 'Standardized_Subdivision']
                     
-                    if new_sub == "UNKNOWN":
-                        df.at[idx, 'Standardized_Subdivision'] = "UNKNOWN"
-                        df.at[idx, 'Category'] = "Needs Manual Review - Unknown Subdivision / Street"
+                    # Always commit text changes to the main dataframe
+                    if new_addr != old_addr:
+                        df.at[idx, address_col] = new_addr
                     
-                    elif new_sub == "CIUDAD DE STRIKE":
-                        df.at[idx, 'Standardized_Subdivision'] = "CIUDAD DE STRIKE"
-                        parsed = parse_address(df.at[idx, address_col])
+                    # Scenario 1: They fixed the text, but left the dropdown alone
+                    if new_addr != old_addr and new_sub == old_sub:
+                        parsed = parse_address(new_addr)
+                        df.at[idx, 'Is_Valid_Molino_1'] = parsed.iloc[0]
                         df.at[idx, 'Strike_Evaluated_Unit'] = parsed.iloc[1]
+                        df.at[idx, 'Standardized_Subdivision'] = parsed.iloc[2]
                         df.at[idx, 'Category'] = parsed.iloc[3]
-                        df.at[idx, 'Is_Valid_Molino_1'] = True
                         
-                    elif new_sub == "CIUDAD DE STRIKE (Force PH 1)":
-                        df.at[idx, 'Standardized_Subdivision'] = "CIUDAD DE STRIKE"
-                        df.at[idx, 'Category'] = "PH 1"
-                        df.at[idx, 'Is_Valid_Molino_1'] = True
-                        df.at[idx, 'Strike_Evaluated_Unit'] = None
-                        
-                    elif new_sub == "CIUDAD DE STRIKE (Force PH 2)":
-                        df.at[idx, 'Standardized_Subdivision'] = "CIUDAD DE STRIKE"
-                        df.at[idx, 'Category'] = "PH 2"
-                        df.at[idx, 'Is_Valid_Molino_1'] = True
-                        df.at[idx, 'Strike_Evaluated_Unit'] = None
-                        
+                    # Scenario 2: They changed the dropdown override
                     else:
                         df.at[idx, 'Standardized_Subdivision'] = new_sub
-                        df.at[idx, 'Category'] = new_sub
-                        df.at[idx, 'Is_Valid_Molino_1'] = True
-                        df.at[idx, 'Strike_Evaluated_Unit'] = None
+                        
+                        if new_sub == "UNKNOWN":
+                            df.at[idx, 'Category'] = "Needs Manual Review - Unknown Subdivision / Street"
+                        
+                        elif new_sub == "CIUDAD DE STRIKE":
+                            parsed = parse_address(new_addr)
+                            df.at[idx, 'Strike_Evaluated_Unit'] = parsed.iloc[1]
+                            df.at[idx, 'Category'] = parsed.iloc[3]
+                            df.at[idx, 'Is_Valid_Molino_1'] = True
+                            
+                        elif new_sub == "CIUDAD DE STRIKE (Force PH 1)":
+                            df.at[idx, 'Category'] = "PH 1"
+                            df.at[idx, 'Is_Valid_Molino_1'] = True
+                            df.at[idx, 'Strike_Evaluated_Unit'] = None
+                            
+                        elif new_sub == "CIUDAD DE STRIKE (Force PH 2)":
+                            df.at[idx, 'Category'] = "PH 2"
+                            df.at[idx, 'Is_Valid_Molino_1'] = True
+                            df.at[idx, 'Strike_Evaluated_Unit'] = None
+                            
+                        else:
+                            df.at[idx, 'Category'] = new_sub
+                            df.at[idx, 'Is_Valid_Molino_1'] = True
+                            df.at[idx, 'Strike_Evaluated_Unit'] = None
                 
                 df.to_csv(DATA_FILE, index=False)
                 
@@ -473,7 +492,8 @@ elif page == "Filtering":
                 st.success("Progress saved successfully to the system!")
                 st.rerun()
     
-        disabled_cols = [address_col, 'Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Category']
+        # Removed address_col from disabled_cols so it can be edited by the user
+        disabled_cols = ['Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Category']
         
         st.session_state['edited_df_state'] = st.data_editor(
             view_df, 
