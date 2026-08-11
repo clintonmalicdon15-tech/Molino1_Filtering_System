@@ -131,15 +131,15 @@ if not st.session_state['logged_in']:
 # --- AUTO-LOAD SAVED SESSION ON STARTUP ---
 if 'processed_df' not in st.session_state and os.path.exists(DATA_FILE) and os.path.exists(CONFIG_FILE):
     try:
-        # Enforce object dtypes to prevent Pandas TypeError crashes on reload
-        st.session_state['processed_df'] = pd.read_csv(
-            DATA_FILE, 
-            dtype={
-                'Strike_Evaluated_Unit': 'object', 
-                'Standardized_Subdivision': 'object', 
-                'Category': 'object'
-            }
-        )
+        # Load CSV and enforce object types immediately to prevent strict float64 errors
+        loaded_df = pd.read_csv(DATA_FILE)
+        
+        for col in ['Strike_Evaluated_Unit', 'Standardized_Subdivision', 'Category']:
+            if col in loaded_df.columns:
+                loaded_df[col] = loaded_df[col].astype('object')
+                
+        st.session_state['processed_df'] = loaded_df
+        
         with open(CONFIG_FILE, "r") as f:
             st.session_state['address_col'] = f.read().strip()
     except Exception as e:
@@ -330,10 +330,11 @@ if page == "Home":
         if st.button("Run Initial Filter", type="primary"):
             df[['Is_Valid_Molino_1', 'Strike_Evaluated_Unit', 'Standardized_Subdivision', 'Category']] = df[address_col].apply(parse_address)
             
-            # Enforce object type immediately after creation to prevent future errors
-            df['Strike_Evaluated_Unit'] = df['Strike_Evaluated_Unit'].astype(object)
-            df['Standardized_Subdivision'] = df['Standardized_Subdivision'].astype(object)
-            df['Category'] = df['Category'].astype(object)
+            # CRITICAL FIX: Force these columns into flexible object types so they don't break when text is added later
+            df['Strike_Evaluated_Unit'] = df['Strike_Evaluated_Unit'].astype('object')
+            df['Standardized_Subdivision'] = df['Standardized_Subdivision'].astype('object')
+            df['Category'] = df['Category'].astype('object')
+            df[address_col] = df[address_col].astype('object')
             
             st.session_state['processed_df'] = df
             st.session_state['address_col'] = address_col
@@ -368,7 +369,7 @@ elif page == "Dashboard":
         if selected_filter == "All Records (Entire Molino 1)":
             view_df = df
         elif selected_filter == "All Valid Categorized Records":
-            view_df = df[~df['Category'].str.startswith('Needs Manual') & ~df['Category'].str.startswith('Excluded')]
+            view_df = df[~df['Category'].astype(str).str.startswith('Needs Manual') & ~df['Category'].astype(str).str.startswith('Excluded')]
         elif selected_filter == "PHASE 1 ONLY (Strike)":
             view_df = df[df['Category'] == 'PH 1']
         elif selected_filter == "PHASE 2 ONLY (Strike)":
@@ -376,9 +377,9 @@ elif page == "Dashboard":
         elif selected_filter == "CIUDAD DE STRIKE (All Valid)":
             view_df = df[df['Category'].isin(['PH 1', 'PH 2'])]
         elif selected_filter == "Needs Manual Review":
-            view_df = df[df['Category'].str.startswith('Needs Manual Review')]
+            view_df = df[df['Category'].astype(str).str.startswith('Needs Manual Review')]
         elif selected_filter == "Excluded":
-            view_df = df[df['Category'].str.startswith('Excluded')]
+            view_df = df[df['Category'].astype(str).str.startswith('Excluded')]
         else:
             view_df = df[df['Standardized_Subdivision'] == selected_filter]
             
@@ -388,9 +389,9 @@ elif page == "Dashboard":
         m1, m2, m3 = st.columns(3)
         
         m1.metric(f"Total in {selected_filter[:15]}...", len(view_df))
-        valid_count_in_view = len(view_df[~view_df['Category'].str.startswith('Needs Manual') & ~view_df['Category'].str.startswith('Excluded')])
+        valid_count_in_view = len(view_df[~view_df['Category'].astype(str).str.startswith('Needs Manual') & ~view_df['Category'].astype(str).str.startswith('Excluded')])
         m2.metric("Categorized in View", valid_count_in_view)
-        global_pending = len(df[df['Category'].str.startswith('Needs Manual')])
+        global_pending = len(df[df['Category'].astype(str).str.startswith('Needs Manual')])
         m3.metric("Global Pending Review", global_pending)
         
         st.divider()
@@ -433,7 +434,7 @@ elif page == "Filtering":
         if selected_filter == "All Records (Entire Molino 1)":
             view_df = df
         elif selected_filter == "All Valid Categorized Records":
-            view_df = df[~df['Category'].str.startswith('Needs Manual') & ~df['Category'].str.startswith('Excluded')]
+            view_df = df[~df['Category'].astype(str).str.startswith('Needs Manual') & ~df['Category'].astype(str).str.startswith('Excluded')]
         elif selected_filter == "PHASE 1 ONLY (Strike)":
             view_df = df[df['Category'] == 'PH 1']
         elif selected_filter == "PHASE 2 ONLY (Strike)":
@@ -441,15 +442,20 @@ elif page == "Filtering":
         elif selected_filter == "CIUDAD DE STRIKE (All Valid)":
             view_df = df[df['Category'].isin(['PH 1', 'PH 2'])]
         elif selected_filter == "Needs Manual Review":
-            view_df = df[df['Category'].str.startswith('Needs Manual Review')]
+            view_df = df[df['Category'].astype(str).str.startswith('Needs Manual Review')]
         elif selected_filter == "Excluded":
-            view_df = df[df['Category'].str.startswith('Excluded')]
+            view_df = df[df['Category'].astype(str).str.startswith('Excluded')]
         else:
             view_df = df[df['Standardized_Subdivision'] == selected_filter]
         
         if st.button("🔄 Save & Apply All Changes", type="primary"):
             if 'edited_df_state' in st.session_state:
                 edited_df_current = st.session_state['edited_df_state']
+                
+                # CRITICAL FIX REINFORCEMENT: Make sure the main dataframe doesn't revert to float64 before updating
+                for col in ['Strike_Evaluated_Unit', 'Standardized_Subdivision', 'Category', address_col]:
+                    if col in df.columns:
+                        df[col] = df[col].astype('object')
                 
                 changed_indices = edited_df_current[
                     (edited_df_current['Standardized_Subdivision'] != view_df['Standardized_Subdivision']) |
